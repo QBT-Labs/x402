@@ -26,6 +26,13 @@ export function configure(cfg: X402Config): void {
 }
 
 /**
+ * Reset configuration (for testing)
+ */
+export function resetConfig(): void {
+  config = {};
+}
+
+/**
  * Get current configuration, with environment variable fallbacks
  */
 export function getConfig(): X402Config {

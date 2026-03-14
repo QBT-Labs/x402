@@ -26,7 +26,7 @@
  */
 
 // Config
-export { configure, getConfig, isEnabled, getActiveChains, USDC_CONTRACTS } from './config.js';
+export { configure, getConfig, isEnabled, getActiveChains, resetConfig, USDC_CONTRACTS } from './config.js';
 export type { X402Config, ChainConfig } from './config.js';
 
 // Pricing

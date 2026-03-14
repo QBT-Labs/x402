@@ -1,0 +1,66 @@
+{
+  "name": "@qbtlabs/x402",
+  "version": "0.1.0",
+  "description": "Multi-chain payment protocol for AI agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./chains/evm": {
+      "types": "./dist/chains/evm.d.ts",
+      "import": "./dist/chains/evm.js"
+    },
+    "./chains/solana": {
+      "types": "./dist/chains/solana.d.ts",
+      "import": "./dist/chains/solana.js"
+    },
+    "./middleware/mcp": {
+      "types": "./dist/middleware/mcp.d.ts",
+      "import": "./dist/middleware/mcp.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["x402", "payments", "mcp", "ai-agents", "crypto", "usdc"],
+  "author": "QBT Labs <hello@qbtlabs.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/QBT-Labs/x402.git"
+  },
+  "homepage": "https://github.com/QBT-Labs/x402#readme",
+  "bugs": {
+    "url": "https://github.com/QBT-Labs/x402/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@noble/curves": "^2.0.0",
+    "@noble/hashes": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0",
+    "ts-jest": "^29.0.0"
+  }
+}

@@ -20,7 +20,7 @@ export interface PaymentPayload {
 }
 
 /**
- * Parse base64 payment header
+ * Parse base64-encoded payment header into structured payload
  */
 export function parsePaymentHeader(header: string): PaymentPayload | null {
   try {
@@ -32,7 +32,8 @@ export function parsePaymentHeader(header: string): PaymentPayload | null {
 }
 
 /**
- * Verify payment based on network
+ * Verify payment based on network type.
+ * Delegates to chain-specific verification.
  */
 export async function verifyPayment(
   payment: PaymentPayload,
@@ -58,7 +59,6 @@ export async function verifyPayment(
   }
 
   if (network.startsWith('cardano:')) {
-    // TODO: Implement Cardano verification
     return { valid: false, error: 'Cardano verification not yet implemented' };
   }
 

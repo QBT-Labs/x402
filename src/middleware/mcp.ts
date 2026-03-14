@@ -39,7 +39,7 @@ function paymentRequired(tool: string, priceUsd: number): ToolResult {
 }
 
 /**
- * Create payment error response
+ * Create payment verification error response
  */
 function paymentError(tool: string, error: string): ToolResult {
   return {
@@ -56,34 +56,30 @@ function paymentError(tool: string, error: string): ToolResult {
 }
 
 /**
- * Wrap a tool handler with x402 payment middleware
+ * Wrap a tool handler with x402 payment middleware.
+ * The tool will require payment based on its configured pricing tier.
  */
 export function withX402<T extends ParamsWithPayment>(
   toolName: string,
   handler: ToolHandler<T>
 ): ToolHandler<T> {
   return async (params: T) => {
-    // Skip if x402 not enabled
     if (!isEnabled()) {
       return handler(params);
     }
 
-    // Get pricing
     const pricing = getToolPrice(toolName);
     
-    // Free tools pass through
     if (pricing.tier === 'free' || pricing.price === 0) {
       return handler(params);
     }
 
-    // Check for payment signature
     const paymentSignature = params.paymentSignature;
     
     if (!paymentSignature) {
       return paymentRequired(toolName, pricing.price);
     }
 
-    // Parse and verify payment
     const payment = parsePaymentHeader(paymentSignature);
     if (!payment) {
       return paymentError(toolName, 'Invalid payment signature format');
@@ -94,14 +90,13 @@ export function withX402<T extends ParamsWithPayment>(
       return paymentError(toolName, result.error ?? 'Unknown error');
     }
 
-    // Payment verified - execute tool
     return handler(params);
   };
 }
 
 /**
- * Check payment before tool execution
- * Returns error response if payment required/invalid, null if OK
+ * Check payment before tool execution.
+ * Returns error response if payment required/invalid, null if OK.
  */
 export async function checkPayment(
   toolName: string,

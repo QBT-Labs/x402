@@ -8,20 +8,23 @@ export type PricingTier = 'free' | 'read' | 'analysis' | 'write';
 
 export interface ToolPricing {
   tier: PricingTier;
-  price: number; // USD
+  price: number;
 }
 
+/**
+ * Default prices per tier (USD)
+ */
 export const DEFAULT_TIERS: Record<PricingTier, number> = {
   free: 0,
-  read: 0.001,     // $0.001
-  analysis: 0.005, // $0.005
-  write: 0.01,     // $0.01
+  read: 0.001,
+  analysis: 0.005,
+  write: 0.01,
 };
 
 const toolPricing: Map<string, ToolPricing> = new Map();
 
 /**
- * Set pricing for a tool
+ * Set pricing for a single tool
  */
 export function setToolPrice(tool: string, tier: PricingTier, price?: number): void {
   toolPricing.set(tool, {
@@ -31,7 +34,7 @@ export function setToolPrice(tool: string, tier: PricingTier, price?: number): v
 }
 
 /**
- * Set pricing for multiple tools
+ * Set pricing for multiple tools at once
  */
 export function setToolPrices(prices: Record<string, PricingTier | ToolPricing>): void {
   for (const [tool, tierOrPricing] of Object.entries(prices)) {
@@ -44,14 +47,14 @@ export function setToolPrices(prices: Record<string, PricingTier | ToolPricing>)
 }
 
 /**
- * Get pricing for a tool
+ * Get pricing for a tool (defaults to 'read' tier if not set)
  */
 export function getToolPrice(tool: string): ToolPricing {
   return toolPricing.get(tool) ?? { tier: 'read', price: DEFAULT_TIERS.read };
 }
 
 /**
- * Build payment requirements for a price
+ * Build x402 payment requirements for a given USD price
  */
 export function buildPaymentRequirements(priceUsd: number): {
   accepts: Array<{
@@ -65,7 +68,6 @@ export function buildPaymentRequirements(priceUsd: number): {
   const chains = getActiveChains();
   const accepts: Array<{ network: string; asset: string; amount: string; payTo: string }> = [];
 
-  // Convert USD to micro-units (6 decimals for USDC)
   const amount = Math.ceil(priceUsd * 1_000_000).toString();
 
   for (const chain of chains) {

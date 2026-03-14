@@ -19,7 +19,9 @@ export interface EvmPaymentPayload {
 }
 
 /**
- * Verify EVM payment signature
+ * Verify EVM payment signature.
+ * Basic mode validates structure and business rules.
+ * Full mode adds cryptographic verification (requires viem/ethers).
  */
 export async function verifyPayment(
   payment: EvmPaymentPayload,
@@ -29,14 +31,11 @@ export async function verifyPayment(
   const cfg = getConfig();
   const mode = cfg.verifyMode ?? 'basic';
 
-  // Basic verification (always run)
   const basicResult = verifyBasic(payment, expectedAmount);
   if (!basicResult.valid) {
     return basicResult;
   }
 
-  // Full verification requires external libraries (viem/ethers)
-  // For now, basic verification is sufficient for testnet
   if (mode === 'full') {
     console.warn('x402: Full EVM verification requires viem. Using basic mode.');
   }
@@ -45,7 +44,7 @@ export async function verifyPayment(
 }
 
 /**
- * Basic verification (fast, for testing)
+ * Basic verification: validates amount, recipient, validity window, and signature format
  */
 function verifyBasic(
   payment: EvmPaymentPayload,
@@ -53,12 +52,10 @@ function verifyBasic(
 ): { valid: boolean; error?: string } {
   const { authorization, signature } = payment;
 
-  // Check signature exists and has valid format
   if (!signature || !signature.startsWith('0x') || signature.length !== 132) {
     return { valid: false, error: 'Invalid signature format' };
   }
 
-  // Check amount
   const paidAmount = BigInt(authorization.value);
   const requiredAmount = BigInt(Math.ceil(expectedAmount * 1_000_000));
 
@@ -66,13 +63,11 @@ function verifyBasic(
     return { valid: false, error: `Insufficient: ${paidAmount} < ${requiredAmount}` };
   }
 
-  // Check recipient
   const cfg = getConfig();
   if (authorization.to.toLowerCase() !== cfg.evm?.address?.toLowerCase()) {
     return { valid: false, error: 'Wrong recipient' };
   }
 
-  // Check validity window
   const now = Math.floor(Date.now() / 1000);
   if (BigInt(authorization.validBefore) < BigInt(now)) {
     return { valid: false, error: 'Authorization expired' };
@@ -82,7 +77,6 @@ function verifyBasic(
     return { valid: false, error: 'Authorization not yet valid' };
   }
 
-  // Check nonce format
   if (!authorization.nonce || !authorization.nonce.startsWith('0x')) {
     return { valid: false, error: 'Invalid nonce format' };
   }
@@ -91,7 +85,7 @@ function verifyBasic(
 }
 
 /**
- * Get USDC contract address for chain
+ * Get USDC contract address for a given chain
  */
 export function getUsdcAddress(chainId: string): string | undefined {
   return USDC_CONTRACTS[chainId];

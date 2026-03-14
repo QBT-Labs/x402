@@ -26,10 +26,9 @@ export function configure(cfg: X402Config): void {
 }
 
 /**
- * Get current config
+ * Get current configuration, with environment variable fallbacks
  */
 export function getConfig(): X402Config {
-  // Also read from env vars as fallback
   return {
     evm: config.evm || (process.env.X402_EVM_ADDRESS ? {
       address: process.env.X402_EVM_ADDRESS,
@@ -48,7 +47,7 @@ export function getConfig(): X402Config {
 }
 
 /**
- * Check if x402 is enabled
+ * Check if x402 is enabled (at least one chain configured)
  */
 export function isEnabled(): boolean {
   const cfg = getConfig();
@@ -56,7 +55,7 @@ export function isEnabled(): boolean {
 }
 
 /**
- * Get active chain IDs
+ * Get list of active chain identifiers
  */
 export function getActiveChains(): string[] {
   const cfg = getConfig();
@@ -78,10 +77,12 @@ export function getActiveChains(): string[] {
   return chains;
 }
 
-// USDC contract addresses
+/**
+ * USDC contract addresses by chain
+ */
 export const USDC_CONTRACTS: Record<string, string> = {
-  'eip155:8453': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',     // Base Mainnet
-  'eip155:84532': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',   // Base Sepolia
+  'eip155:8453': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  'eip155:84532': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
   'solana:mainnet': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   'solana:devnet': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
 };

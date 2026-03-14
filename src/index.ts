@@ -46,5 +46,14 @@ export type { PaymentPayload } from './verify.js';
 // Middleware
 export { withX402, checkPayment } from './middleware/mcp.js';
 
+// Facilitator
+export {
+  buildFacilitatorRequirements,
+  verifyWithFacilitator,
+  settleWithFacilitator,
+  processPayment,
+  checkFacilitatorHealth,
+} from './facilitator.js';
+
 // Chain modules (for direct access)
 export * as chains from './chains/index.js';

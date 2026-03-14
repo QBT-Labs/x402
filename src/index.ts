@@ -55,5 +55,8 @@ export {
   checkFacilitatorHealth,
 } from './facilitator.js';
 
+// Client (for agents)
+export { signPayment, buildPaymentPayload, parsePaymentRequired } from './client.js';
+
 // Chain modules (for direct access)
 export * as chains from './chains/index.js';

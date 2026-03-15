@@ -21,6 +21,14 @@
     "./middleware/mcp": {
       "types": "./dist/middleware/mcp.d.ts",
       "import": "./dist/middleware/mcp.js"
+    },
+    "./proxy": {
+      "types": "./dist/proxy/index.d.ts",
+      "import": "./dist/proxy/index.js"
+    },
+    "./transport": {
+      "types": "./dist/transport/index.d.ts",
+      "import": "./dist/transport/index.js"
     }
   },
   "files": [
@@ -58,7 +66,7 @@
     "node": ">=18"
   },
   "peerDependencies": {
-    "@modelcontextprotocol/sdk": ">=1.0.0"
+    "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "peerDependenciesMeta": {
     "@modelcontextprotocol/sdk": {

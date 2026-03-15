@@ -63,6 +63,8 @@ export { createPaymentFetch } from './transport/payment-fetch.js';
 export type { PaymentFetchOptions } from './transport/payment-fetch.js';
 
 // Proxy
+export { createClientProxy } from './proxy/client-proxy.js';
+export type { ClientProxyOptions } from './proxy/client-proxy.js';
 export { createPassthroughProxy } from './proxy/passthrough.js';
 export type { PassthroughProxyOptions } from './proxy/passthrough.js';
 

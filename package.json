@@ -31,6 +31,10 @@
       "import": "./dist/transport/index.js"
     }
   },
+  "bin": {
+    "qbtlabs-x402": "./dist/scripts/client-proxy.js",
+    "x402-proxy": "./dist/scripts/client-proxy.js"
+  },
   "files": [
     "dist",
     "README.md",

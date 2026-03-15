@@ -1,10 +1,3 @@
-/**
- * Payment-aware fetch wrapper for x402
- *
- * Wraps the standard fetch to automatically handle HTTP 402 Payment Required
- * responses by signing and attaching payment headers.
- */
-
 import { parsePaymentRequired, signPayment, buildPaymentPayload } from '../client.js';
 
 export interface PaymentFetchOptions {
@@ -14,12 +7,8 @@ export interface PaymentFetchOptions {
   onPaymentSent?: (url: string, amount: number) => void;
 }
 
-/**
- * Create a fetch-compatible function that automatically handles 402 responses.
- *
- * On a 402 response, it parses payment requirements, signs the payment,
- * and retries the request with the X-PAYMENT header attached.
- */
+const log = (...args: unknown[]) => process.stderr.write('[PaymentFetch] ' + args.join(' ') + '\n');
+
 export function createPaymentFetch(options: PaymentFetchOptions): typeof fetch {
   const { privateKey, chainId, onPaymentRequired, onPaymentSent } = options;
 
@@ -27,24 +16,34 @@ export function createPaymentFetch(options: PaymentFetchOptions): typeof fetch {
     input: string | URL | Request,
     init?: RequestInit,
   ): Promise<Response> {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+    log('Making request to:', url);
+    
     const response = await fetch(input, init);
+    log('Response status:', response.status);
 
     if (response.status !== 402) {
       return response;
     }
 
-    const body = (await response.json()) as {
-      error?: string;
-      price?: number;
-      accepts?: Array<{ network: string; asset: string; payTo: string; maxAmountRequired: string }>;
-    };
+    log('Got 402 Payment Required!');
+    const bodyText = await response.text();
+    log('Body:', bodyText.substring(0, 200));
+    
+    let body: any;
+    try {
+      body = JSON.parse(bodyText);
+    } catch (e) {
+      log('Failed to parse JSON:', e);
+      throw new Error('Failed to parse 402 response');
+    }
 
     const requirements = parsePaymentRequired(body);
+    log('Parsed requirements:', JSON.stringify(requirements));
+    
     if (!requirements) {
       throw new Error('Failed to parse payment requirements from 402 response');
     }
-
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
 
     if (onPaymentRequired) {
       const approved = await onPaymentRequired(url, requirements.price);
@@ -53,22 +52,27 @@ export function createPaymentFetch(options: PaymentFetchOptions): typeof fetch {
       }
     }
 
+    log('Signing payment...');
     const signedPayment = await signPayment({
       privateKey,
       to: requirements.payTo as `0x${string}`,
       amount: requirements.price,
       chainId: chainId ?? requirements.chainId,
     });
+    log('Payment signed, from:', signedPayment.from);
 
     const paymentHeader = buildPaymentPayload(signedPayment);
+    log('Payment header length:', paymentHeader.length);
 
     const retryHeaders = new Headers(init?.headers);
     retryHeaders.set('X-PAYMENT', paymentHeader);
 
+    log('Retrying with payment...');
     const retryResponse = await fetch(input, {
       ...init,
       headers: retryHeaders,
     });
+    log('Retry response status:', retryResponse.status);
 
     if (onPaymentSent) {
       onPaymentSent(url, requirements.price);

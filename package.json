@@ -1,6 +1,6 @@
 {
   "name": "@qbtlabs/x402",
-  "version": "0.1.1",
+  "version": "0.2.3",
   "description": "Multi-chain payment protocol for AI agents",
   "type": "module",
   "main": "dist/index.js",
@@ -80,7 +80,8 @@
   "dependencies": {
     "@noble/curves": "^2.0.0",
     "@noble/hashes": "^2.0.0",
-    "viem": "^2.47.4"
+    "viem": "^2.47.4",
+    "@modelcontextprotocol/sdk": "^1.12.0"
   },
   "devDependencies": {
     "@types/jest": "^29.0.0",

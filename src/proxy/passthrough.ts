@@ -8,7 +8,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -20,6 +19,7 @@ import {
   CompleteRequestSchema,
   SetLevelRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { SimpleHTTPTransport } from '../transport/simple-http.js';
 
 export interface PassthroughProxyOptions {
   targetUrl: string;
@@ -44,7 +44,9 @@ export async function createPassthroughProxy(
   // Create MCP client that connects to the remote server
   const mcpClient = new Client({ name: `${name}-client`, version });
 
-  const transport = new StreamableHTTPClientTransport(new URL(targetUrl), {
+  // Use SimpleHTTPTransport for stateless JSON-RPC servers
+  const transport = new SimpleHTTPTransport({
+    url: targetUrl,
     fetch: fetchFn,
   });
 
@@ -75,51 +77,51 @@ export async function createPassthroughProxy(
 
   // Register passthrough handlers for tools
   if (hasTools) {
-    mcpServer.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(ListToolsRequestSchema, async (request: any) => {
       return mcpClient.listTools(request.params);
     });
 
-    mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(CallToolRequestSchema, async (request: any) => {
       return mcpClient.callTool(request.params);
     });
   }
 
   // Register passthrough handlers for resources
   if (hasResources) {
-    mcpServer.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(ListResourcesRequestSchema, async (request: any) => {
       return mcpClient.listResources(request.params);
     });
 
-    mcpServer.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(ListResourceTemplatesRequestSchema, async (request: any) => {
       return mcpClient.listResourceTemplates(request.params);
     });
 
-    mcpServer.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(ReadResourceRequestSchema, async (request: any) => {
       return mcpClient.readResource(request.params);
     });
   }
 
   // Register passthrough handlers for prompts
   if (hasPrompts) {
-    mcpServer.setRequestHandler(ListPromptsRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(ListPromptsRequestSchema, async (request: any) => {
       return mcpClient.listPrompts(request.params);
     });
 
-    mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(GetPromptRequestSchema, async (request: any) => {
       return mcpClient.getPrompt(request.params);
     });
   }
 
   // Register passthrough handler for completion
   if (hasCompletion) {
-    mcpServer.setRequestHandler(CompleteRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(CompleteRequestSchema, async (request: any) => {
       return mcpClient.complete(request.params);
     });
   }
 
   // Register passthrough handler for logging level
   if (hasLogging) {
-    mcpServer.setRequestHandler(SetLevelRequestSchema, async (request) => {
+    mcpServer.setRequestHandler(SetLevelRequestSchema, async (request: any) => {
       return mcpClient.setLoggingLevel(request.params.level);
     });
   }

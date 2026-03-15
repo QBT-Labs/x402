@@ -58,5 +58,9 @@ export {
 // Client (for agents)
 export { signPayment, buildPaymentPayload, parsePaymentRequired } from './client.js';
 
+// Transport
+export { createPaymentFetch } from './transport/payment-fetch.js';
+export type { PaymentFetchOptions } from './transport/payment-fetch.js';
+
 // Chain modules (for direct access)
 export * as chains from './chains/index.js';

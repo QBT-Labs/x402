@@ -61,6 +61,8 @@ export { signPayment, buildPaymentPayload, parsePaymentRequired } from './client
 // Transport
 export { createPaymentFetch } from './transport/payment-fetch.js';
 export type { PaymentFetchOptions } from './transport/payment-fetch.js';
+export { withX402Server } from './transport/server.js';
+export type { X402ServerOptions } from './transport/server.js';
 
 // Proxy
 export { createClientProxy } from './proxy/client-proxy.js';

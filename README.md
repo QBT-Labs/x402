@@ -41,11 +41,11 @@ sequenceDiagram
 
 ## Features
 
-- 🔐 **Client Proxy** — Automatic payment signing for Claude Code/Desktop
-- 🛡️ **Server Middleware** — Payment gating with zero tool-level changes
-- 💸 **Payment-Aware Fetch** — Drop-in replacement for `fetch()` with payment handling
-- ⛓️ **Multi-Chain** — Base (USDC) with Solana support planned
-- 🧪 **Testnet Ready** — Base Sepolia for development
+- **Client Proxy** — Automatic payment signing for Claude Code/Desktop
+- **Server Middleware** — Payment gating with zero tool-level changes
+- **Payment-Aware Fetch** — Drop-in replacement for `fetch()` with payment handling
+- **Multi-Chain** — Base (USDC) with Solana support planned
+- **Testnet Ready** — Base Sepolia for development
 
 ## Installation
 

@@ -3,3 +3,4 @@ export type { PaymentFetchOptions } from './payment-fetch.js';
 
 export { withX402Server } from './server.js';
 export type { X402ServerOptions } from './server.js';
+export * from './simple-http.js';

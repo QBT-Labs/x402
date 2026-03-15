@@ -49,7 +49,7 @@ export function getConfig(): X402Config {
     } : undefined),
     testnet: config.testnet ?? process.env.X402_TESTNET === 'true',
     verifyMode: config.verifyMode ?? (process.env.X402_VERIFY_MODE as 'basic' | 'full') ?? 'basic',
-    facilitatorUrl: config.facilitatorUrl ?? process.env.X402_FACILITATOR_URL ?? 'https://x402.org',
+    facilitatorUrl: config.facilitatorUrl ?? process.env.X402_FACILITATOR_URL ?? 'https://x402.org/facilitator',
   };
 }
 

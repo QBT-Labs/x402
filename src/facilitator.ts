@@ -10,6 +10,23 @@ import { getConfig, getActiveChains, USDC_CONTRACTS } from './config.js';
 import { getToolPrice } from './pricing.js';
 
 /**
+ * Convert our PaymentPayload into the facilitator's expected PaymentPayloadV1 format
+ */
+function toFacilitatorPayload(payment: PaymentPayload): {
+  x402Version: number;
+  scheme: string;
+  network: string;
+  payload: Record<string, unknown>;
+} {
+  return {
+    x402Version: payment.x402Version ?? 2,
+    scheme: 'exact',
+    network: payment.accepted?.network ?? '',
+    payload: payment.payload as unknown as Record<string, unknown>,
+  };
+}
+
+/**
  * Build payment requirements for a tool (facilitator format)
  */
 export function buildFacilitatorRequirements(toolName: string): {
@@ -18,6 +35,8 @@ export function buildFacilitatorRequirements(toolName: string): {
     network: string;
     asset: string;
     maxAmountRequired: string;
+    amount: string;
+    maxTimeoutSeconds: number;
     resource: string;
     payTo: string;
     description: string;
@@ -34,6 +53,8 @@ export function buildFacilitatorRequirements(toolName: string): {
     network: string;
     asset: string;
     maxAmountRequired: string;
+    amount: string;
+    maxTimeoutSeconds: number;
     resource: string;
     payTo: string;
     description: string;
@@ -60,6 +81,8 @@ export function buildFacilitatorRequirements(toolName: string): {
       network: chain,
       asset,
       maxAmountRequired: amountMicro,
+      amount: amountMicro,
+      maxTimeoutSeconds: 300,
       resource: `mcp:tool:${toolName}`,
       payTo,
       description: `Payment for ${toolName}`,
@@ -78,7 +101,7 @@ export async function verifyWithFacilitator(
   toolName: string
 ): Promise<{ valid: boolean; error?: string }> {
   const cfg = getConfig();
-  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org';
+  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org/facilitator';
   const requirements = buildFacilitatorRequirements(toolName);
 
   const acceptedNetwork = payment.accepted?.network;
@@ -93,8 +116,8 @@ export async function verifyWithFacilitator(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        x402Version: payment.x402Version || 1,
-        payload: payment.payload,
+        x402Version: payment.x402Version ?? 2,
+        paymentPayload: toFacilitatorPayload(payment),
         paymentRequirements: matchingRequirement,
       }),
     });
@@ -131,7 +154,7 @@ export async function settleWithFacilitator(
   toolName: string
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   const cfg = getConfig();
-  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org';
+  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org/facilitator';
   const requirements = buildFacilitatorRequirements(toolName);
 
   const acceptedNetwork = payment.accepted?.network;
@@ -146,8 +169,8 @@ export async function settleWithFacilitator(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        x402Version: payment.x402Version || 1,
-        payload: payment.payload,
+        x402Version: payment.x402Version ?? 2,
+        paymentPayload: toFacilitatorPayload(payment),
         paymentRequirements: matchingRequirement,
       }),
     });
@@ -220,7 +243,7 @@ export async function processPayment<T>(
  */
 export async function checkFacilitatorHealth(): Promise<boolean> {
   const cfg = getConfig();
-  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org';
+  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org/facilitator';
 
   try {
     const response = await fetch(`${facilitatorUrl}/health`, {

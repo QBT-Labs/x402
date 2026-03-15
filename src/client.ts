@@ -3,7 +3,6 @@
  */
 
 import { privateKeyToAccount } from 'viem/accounts';
-import { signTypedData } from 'viem/actions';
 import { createWalletClient, http } from 'viem';
 import { baseSepolia, base } from 'viem/chains';
 
@@ -110,10 +109,25 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
  */
 export function buildPaymentPayload(signedPayment: SignedPayment): string {
   const payload = {
-    x402Version: 1,
-    payload: signedPayment,
+    x402Version: 2,
+    payload: {
+      authorization: {
+        from: signedPayment.from,
+        to: signedPayment.to,
+        value: signedPayment.value,
+        validAfter: signedPayment.validAfter,
+        validBefore: signedPayment.validBefore,
+        nonce: signedPayment.nonce,
+      },
+      signature: signedPayment.signature,
+    },
     accepted: {
       network: signedPayment.network,
+      asset: signedPayment.network === 'eip155:84532'
+        ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+        : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      amount: signedPayment.value,
+      payTo: signedPayment.to,
     },
   };
   return Buffer.from(JSON.stringify(payload)).toString('base64');

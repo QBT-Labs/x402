@@ -38,11 +38,29 @@ const mode = (process.env.MODE as 'stdio' | 'http') || 'stdio';
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : undefined;
 const chainId = process.env.CHAIN_ID ? parseInt(process.env.CHAIN_ID, 10) : undefined;
 
+// Exchange API credentials (optional, for private endpoints)
+const exchangeCredentials: Record<string, string> = {};
+const credentialKeys = [
+  'MEXC_API_KEY', 'MEXC_SECRET_KEY',
+  'GATEIO_API_KEY', 'GATEIO_SECRET',
+  'BITGET_API_KEY', 'BITGET_SECRET', 'BITGET_PASSPHRASE',
+  'KRAKEN_API_KEY', 'KRAKEN_SECRET',
+];
+
+for (const key of credentialKeys) {
+  if (process.env[key]) {
+    exchangeCredentials[key] = process.env[key]!;
+  }
+}
+
+const hasCredentials = Object.keys(exchangeCredentials).length > 0;
+
 log(`x402 client proxy starting...`);
 log(`  Target: ${targetUrl}`);
 log(`  Mode:   ${mode}`);
 if (port) log(`  Port:   ${port}`);
 if (chainId) log(`  Chain:  ${chainId}`);
+if (hasCredentials) log(`  Exchange credentials: ${Object.keys(exchangeCredentials).length} keys`);
 
 let proxy: { stop: () => Promise<void> } | undefined;
 
@@ -64,6 +82,7 @@ try {
     mode,
     port,
     chainId,
+    exchangeCredentials: hasCredentials ? exchangeCredentials : undefined,
   });
 
   log('Proxy running. Press Ctrl+C to stop.');

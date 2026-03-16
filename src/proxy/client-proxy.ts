@@ -15,7 +15,6 @@ export interface ClientProxyOptions extends PaymentFetchOptions {
   port?: number;
   name?: string;
   version?: string;
-  exchangeCredentials?: Record<string, string>;
 }
 
 /**
@@ -34,20 +33,10 @@ export async function createClientProxy(
     port,
     name,
     version,
-    exchangeCredentials,
     ...paymentOptions
   } = options;
 
   const fetchFn = createPaymentFetch(paymentOptions);
-
-  // Build headers for exchange credentials
-  const extraHeaders: Record<string, string> = {};
-  if (exchangeCredentials) {
-    // Encode credentials as JSON in a header
-    extraHeaders['X-Exchange-Credentials'] = Buffer.from(
-      JSON.stringify(exchangeCredentials)
-    ).toString('base64');
-  }
 
   return createPassthroughProxy({
     targetUrl,
@@ -56,6 +45,5 @@ export async function createClientProxy(
     port,
     name,
     version,
-    extraHeaders,
   });
 }

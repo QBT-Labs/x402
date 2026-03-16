@@ -64,12 +64,9 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
     transport: http(),
   });
 
-  // Base Sepolia USDC uses "USDC" as name, mainnet uses "USD Coin"
-  const domainName = chainId === 84532 ? 'USDC' : 'USD Coin';
-  
   const signature = await client.signTypedData({
     domain: {
-      name: domainName,
+      name: 'USD Coin',
       version: '2',
       chainId: BigInt(chainId),
       verifyingContract: usdcContract,

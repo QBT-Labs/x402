@@ -28,6 +28,7 @@ export interface PassthroughProxyOptions {
   port?: number;
   name?: string;
   version?: string;
+  extraHeaders?: Record<string, string>;
 }
 
 export async function createPassthroughProxy(
@@ -39,6 +40,7 @@ export async function createPassthroughProxy(
     mode,
     name = 'x402-proxy',
     version = '1.0.0',
+    extraHeaders = {},
   } = options;
 
   // Create MCP client that connects to the remote server
@@ -48,6 +50,7 @@ export async function createPassthroughProxy(
   const transport = new SimpleHTTPTransport({
     url: targetUrl,
     fetch: fetchFn,
+    headers: extraHeaders,
   });
 
   await mcpClient.connect(transport);

@@ -1,6 +1,6 @@
 {
   "name": "@qbtlabs/x402",
-  "version": "0.2.3",
+  "version": "0.2.1",
   "description": "Multi-chain payment protocol for AI agents",
   "type": "module",
   "main": "dist/index.js",
@@ -70,7 +70,7 @@
     "node": ">=18"
   },
   "peerDependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "@modelcontextprotocol/sdk": "1.27.1"
   },
   "peerDependenciesMeta": {
     "@modelcontextprotocol/sdk": {

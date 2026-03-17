@@ -43,7 +43,7 @@ const MockServer = jest.fn<any>().mockImplementation(() => ({
 }));
 
 const MockStdioServerTransport = jest.fn<any>();
-const MockStreamableHTTPClientTransport = jest.fn<any>();
+const MockSimpleHTTPTransport = jest.fn<any>();
 
 jest.unstable_mockModule('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: MockClient,
@@ -57,8 +57,8 @@ jest.unstable_mockModule('@modelcontextprotocol/sdk/server/stdio.js', () => ({
   StdioServerTransport: MockStdioServerTransport,
 }));
 
-jest.unstable_mockModule('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: MockStreamableHTTPClientTransport,
+jest.unstable_mockModule('../transport/simple-http.js', () => ({
+  SimpleHTTPTransport: MockSimpleHTTPTransport,
 }));
 
 // Import real schemas (they're just Zod objects, no need to mock)
@@ -91,10 +91,10 @@ describe('createPassthroughProxy', () => {
       mode: 'stdio',
     });
 
-    expect(MockStreamableHTTPClientTransport).toHaveBeenCalledWith(
-      new URL('https://remote.example.com/mcp'),
-      { fetch: mockFetchFn },
-    );
+    expect(MockSimpleHTTPTransport).toHaveBeenCalledWith({
+      url: 'https://remote.example.com/mcp',
+      fetch: mockFetchFn,
+    });
     expect(mockClientConnect).toHaveBeenCalled();
   });
 

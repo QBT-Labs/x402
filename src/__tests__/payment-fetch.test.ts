@@ -1,3 +1,4 @@
+
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 // Mock the client module before importing the module under test
@@ -56,10 +57,12 @@ function makeSignedPayment() {
 }
 
 function makeResponse(status: number, body?: unknown): Response {
+  const bodyText = body !== undefined ? JSON.stringify(body) : '';
   return {
     status,
     ok: status >= 200 && status < 300,
     json: () => Promise.resolve(body),
+    text: () => Promise.resolve(bodyText),
     headers: new Headers(),
   } as unknown as Response;
 }

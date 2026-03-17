@@ -70,5 +70,17 @@ export type { ClientProxyOptions } from './proxy/client-proxy.js';
 export { createPassthroughProxy } from './proxy/passthrough.js';
 export type { PassthroughProxyOptions } from './proxy/passthrough.js';
 
+// Split execution
+export { createSplitClient } from './split/client.js';
+export type { SplitClient } from './split/client.js';
+export { verifyJWT, fetchPublicKey, clearPublicKeyCache } from './split/jwt.js';
+export { wrapWithSplitPayment } from './split/gate.js';
+export type {
+  JWTClaims,
+  SplitClientOptions,
+  SplitPaymentGateOptions,
+  PaymentRequirements,
+} from './split/types.js';
+
 // Chain modules (for direct access)
 export * as chains from './chains/index.js';

@@ -1,6 +1,6 @@
 {
   "name": "@qbtlabs/x402",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Multi-chain payment protocol for AI agents",
   "type": "module",
   "main": "dist/index.js",
@@ -29,6 +29,10 @@
     "./transport": {
       "types": "./dist/transport/index.d.ts",
       "import": "./dist/transport/index.js"
+    },
+    "./split": {
+      "types": "./dist/split/index.d.ts",
+      "import": "./dist/split/index.js"
     }
   },
   "bin": {

@@ -42,8 +42,6 @@ function getProgressToken(extra: unknown): string | number | undefined {
 
 /**
  * Send an MCP progress notification to reset the client's request timeout.
- * Falls back to a logging notification if no progress token is available.
- * Best-effort — failures never break the payment flow.
  */
 async function notifyProgress(
   extra: unknown,
@@ -75,7 +73,6 @@ async function notifyProgress(
       });
       debugLog('  progress notification sent OK');
     } else {
-      // Fallback to logging notification
       await ex.sendNotification({
         method: 'notifications/message',
         params: {
@@ -136,7 +133,6 @@ function injectPaymentMeta(
 export function wrapWithSplitPayment(server: McpServer, options: SplitPaymentGateOptions): void {
   debugLog('wrapWithSplitPayment called');
 
-  // Ensure the server declares logging capability so we can send notifications
   try {
     const inner = (server as any).server;
     if (inner?._serverCapabilities && !inner._serverCapabilities.logging) {
@@ -177,7 +173,6 @@ export function wrapWithSplitPayment(server: McpServer, options: SplitPaymentGat
 
         await notifyProgress(extra, 2, 5, `Payment confirmed, verifying…`);
 
-        debugLog('calling verifyJWT…');
         const claims = await client.verifyJWT(jwt);
         debugLog(`verifyJWT done, tool=${claims.tool}`);
 
@@ -190,7 +185,6 @@ export function wrapWithSplitPayment(server: McpServer, options: SplitPaymentGat
 
         await notifyProgress(extra, 3, 5, `Executing ${name}…`);
 
-        // Intercept process.exit to find out what kills the server
         const origExit = process.exit;
         (process as any).exit = (code?: number) => {
           debugLog(`!!! process.exit(${code}) called from:`);
@@ -202,10 +196,8 @@ export function wrapWithSplitPayment(server: McpServer, options: SplitPaymentGat
         process.on('uncaughtException', (e) => debugLog(`!!! uncaughtException: ${e.stack ?? e}`));
         process.on('unhandledRejection', (e) => debugLog(`!!! unhandledRejection: ${e}`));
 
-        debugLog('calling original handler…');
         try {
           const result = await originalHandler(args, extra);
-          debugLog('original handler done, injecting payment meta');
           await notifyProgress(extra, 4, 5, `Complete`);
           return injectPaymentMeta(result, claims);
         } catch (err) {

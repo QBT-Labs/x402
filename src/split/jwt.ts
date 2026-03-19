@@ -7,8 +7,6 @@
 
 import type { JWTClaims } from './types.js';
 
-// Use crypto.webcrypto for Node.js compatibility (globalThis.crypto.subtle
-// exists in Node 18+ but CryptoKey type requires the DOM lib).
 type WebCryptoKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>;
 
 let cachedPublicKey: WebCryptoKey | null = null;
@@ -52,7 +50,6 @@ export async function fetchPublicKey(publicKeyUrl: string): Promise<WebCryptoKey
   let key: WebCryptoKey;
 
   if (body.kty) {
-    // JWK format
     key = await crypto.subtle.importKey(
       'jwk',
       body as any,

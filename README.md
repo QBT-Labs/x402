@@ -11,13 +11,13 @@ The x402 payment system uses a three-layer proxy architecture:
 
 ```mermaid
 sequenceDiagram
-    participant Claude as Claude Code
-    participant Proxy as Client Proxy<br/>(Local)
+    participant Client as MCP Client<br/>(Claude/Cursor/Windsurf)
+    participant Proxy as x402 Proxy<br/>(Local)
     participant Server as MCP Server<br/>(mcp.openmm.io)
     participant Facilitator as x402.org<br/>(Facilitator)
     participant Chain as Base L2<br/>(USDC)
 
-    Claude->>Proxy: 1. tools/call (get_ticker)
+    Client->>Proxy: 1. tools/call (get_ticker)
     Proxy->>Server: 2. Forward request
     Server-->>Proxy: 3. HTTP 402 + requirements
     Proxy->>Proxy: 4. Sign payment (EIP-3009)
@@ -28,7 +28,7 @@ sequenceDiagram
     Proxy->>Server: 9. Retry with X-PAYMENT header
     Server->>Facilitator: 10. Verify payment
     Server-->>Proxy: 11. Tool result
-    Proxy-->>Claude: 12. Return data
+    Proxy-->>Client: 12. Return data
 ```
 
 ### Three-Layer Model
@@ -41,7 +41,8 @@ sequenceDiagram
 
 ## Features
 
-- **Client Proxy** — Automatic payment signing for Claude Code/Desktop
+- **Multi-Client Support** — Works with Claude Code, Claude Desktop, Cursor, Windsurf, and any MCP client
+- **Client Proxy** — Automatic payment signing via stdio transport
 - **Server Middleware** — Payment gating with zero tool-level changes
 - **Payment-Aware Fetch** — Drop-in replacement for `fetch()` with payment handling
 - **Multi-Chain** — Base (USDC) with Solana support planned
@@ -55,9 +56,11 @@ npm install @qbtlabs/x402
 
 ## Quick Start: Client Side
 
-### For Claude Code Users
+x402 works with any MCP client that supports stdio transport. Configure your preferred client below:
 
-Add to `~/.claude/mcp_servers.json`:
+### Claude Code
+
+Add to `~/.claude.json` (or `~/.claude/mcp_servers.json`):
 
 ```json
 {
@@ -73,7 +76,69 @@ Add to `~/.claude/mcp_servers.json`:
 }
 ```
 
-That's it! Claude Code will now automatically pay for tool calls.
+### Claude Desktop
+
+Add to your Claude Desktop config:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`  
+**Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "openmm": {
+      "command": "npx",
+      "args": ["@qbtlabs/x402", "client-proxy", "--target", "https://mcp.openmm.io/mcp"],
+      "env": {
+        "X402_PRIVATE_KEY": "0xYOUR_PRIVATE_KEY"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to `.cursor/mcp.json` in your workspace (or `~/.cursor/mcp.json` for global):
+
+```json
+{
+  "mcpServers": {
+    "openmm": {
+      "command": "npx",
+      "args": ["@qbtlabs/x402", "client-proxy", "--target", "https://mcp.openmm.io/mcp"],
+      "env": {
+        "X402_PRIVATE_KEY": "0xYOUR_PRIVATE_KEY"
+      }
+    }
+  }
+}
+```
+
+### Windsurf
+
+Add to `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openmm": {
+      "command": "npx",
+      "args": ["@qbtlabs/x402", "client-proxy", "--target", "https://mcp.openmm.io/mcp"],
+      "env": {
+        "X402_PRIVATE_KEY": "0xYOUR_PRIVATE_KEY"
+      }
+    }
+  }
+}
+```
+
+### Any MCP Client
+
+The x402 proxy uses stdio transport, so it works with any MCP-compatible client. The configuration pattern is the same — just point your client to `npx @qbtlabs/x402 client-proxy`.
+
+That's it! Your AI agent will now automatically pay for tool calls.
 
 ### Programmatic Client Usage
 

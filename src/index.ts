@@ -93,3 +93,18 @@ export type {
   VaultInitOptions,
   VaultImportOptions,
 } from './vault/index.js';
+
+// Signer (process isolation)
+export {
+  SignerServer,
+  startSignerServer,
+  SignerClient,
+  createSignerClient,
+  signWithIsolatedSigner,
+} from './signer/index.js';
+export type {
+  SignRequest,
+  SignResponse,
+  SignPayload,
+  SignerConfig,
+} from './signer/index.js';

@@ -3,6 +3,7 @@
 Multi-chain payment protocol for AI agents. Enable pay-per-call monetization for MCP servers with automatic USDC micropayments on Base.
 
 [![npm version](https://img.shields.io/npm/v/@qbtlabs/x402.svg)](https://www.npmjs.com/package/@qbtlabs/x402)
+[![npm downloads](https://img.shields.io/npm/dm/@qbtlabs/x402.svg)](https://www.npmjs.com/package/@qbtlabs/x402)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Architecture
@@ -38,6 +39,94 @@ sequenceDiagram
 | **Client** | `npx @qbtlabs/x402 client-proxy` | Intercepts 402s, signs payments, retries |
 | **Server** | `withX402Server()` middleware | Returns 402s, verifies payments, settles |
 | **Facilitator** | x402.org | Executes on-chain transfers |
+
+## Security Architecture (v0.4.0+)
+
+Private keys should never be exposed to AI agents. The x402 security layer provides three protection mechanisms:
+
+```
+┌───────────────────────────┐     ┌───────────────────────────┐
+│    AI AGENT PROCESS       │     │    x402-signer PROCESS    │
+│                           │     │    (isolated)             │
+│  ┌─────────────────────┐ │     │  ┌─────────────────────┐  │
+│  │ AI Agent (Claude)   │ │     │  │ Encrypted Vault     │  │
+│  │                     │ │     │  │ ~/.x402/vault.enc   │  │
+│  │ NO KEY ACCESS       │ │     │  │ (AES-256-GCM)       │  │
+│  └──────────┬──────────┘ │     │  └──────────┬──────────┘  │
+│             │            │     │             │              │
+│  ┌──────────▼──────────┐ │     │  ┌──────────▼──────────┐  │
+│  │ x402 Client Proxy   │ │     │  │ Policy Engine       │  │
+│  │                     │◄┼─────┼─►│ - Max per tx        │  │
+│  │ Forwards sign reqs  │ │ IPC │  │ - Max per day       │  │
+│  └─────────────────────┘ │     │  │ - Allowed addresses │  │
+│                          │     │  └──────────┬──────────┘  │
+└──────────────────────────┘     │             │              │
+                                 │  ┌──────────▼──────────┐  │
+                                 │  │ Sign → Wipe Memory  │  │
+                                 │  └─────────────────────┘  │
+                                 └───────────────────────────┘
+```
+
+### Security Layers
+
+| Layer | Component | Protection |
+|-------|-----------|------------|
+| **Encrypted Vault** | `~/.x402/vault.enc` | Keys encrypted at rest (AES-256-GCM, PBKDF2) |
+| **Process Isolation** | `x402-signer` | Keys never enter AI agent process |
+| **Policy Engine** | `~/.x402/policy.json` | Spending limits, allowlists, audit log |
+
+### Vault CLI
+
+```bash
+# Initialize new vault (generates key)
+x402 vault init
+
+# Import existing key
+x402 vault import
+x402 vault import --from-env X402_PRIVATE_KEY
+
+# Show wallet address (no decryption needed)
+x402 vault address
+
+# Change password
+x402 vault passwd
+```
+
+### Policy Configuration
+
+```json
+// ~/.x402/policy.json
+{
+  "rules": {
+    "maxSpendPerTx": { "amount": "10", "currency": "USDC" },
+    "maxSpendPerDay": { "amount": "100", "currency": "USDC" },
+    "allowedChains": ["base"],
+    "allowedRecipients": ["0xfacilitator..."]
+  },
+  "audit": {
+    "enabled": true,
+    "logFile": "~/.x402/audit.log"
+  }
+}
+```
+
+### Policy CLI
+
+```bash
+# View current policy
+x402 policy show
+
+# Set spending limits
+x402 policy set maxSpendPerTx 10 USDC
+x402 policy set maxSpendPerDay 100 USDC
+
+# View spending history
+x402 policy spending
+x402 policy spending --week
+
+# View audit log
+x402 policy audit
+```
 
 ## Features
 

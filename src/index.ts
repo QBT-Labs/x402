@@ -108,3 +108,20 @@ export type {
   SignPayload,
   SignerConfig,
 } from './signer/index.js';
+
+// Policy (spending limits)
+export {
+  PolicyEngine,
+  createPolicyEngine,
+  SpendingTracker,
+  AuditLogger,
+  formatUSDC,
+  parseUSDC,
+} from './policy/index.js';
+export type {
+  PolicyConfig,
+  PolicyRules,
+  PolicyCheckResult,
+  TransactionRecord,
+  AmountLimit,
+} from './policy/index.js';

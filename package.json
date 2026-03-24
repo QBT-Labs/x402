@@ -41,13 +41,18 @@
     "./signer": {
       "types": "./dist/signer/index.d.ts",
       "import": "./dist/signer/index.js"
+    },
+    "./policy": {
+      "types": "./dist/policy/index.d.ts",
+      "import": "./dist/policy/index.js"
     }
   },
   "bin": {
     "qbtlabs-x402": "./dist/scripts/client-proxy.js",
     "x402-proxy": "./dist/scripts/client-proxy.js",
     "x402-vault": "./dist/scripts/vault-cli.js",
-    "x402-signer": "./dist/scripts/signer-cli.js"
+    "x402-signer": "./dist/scripts/signer-cli.js",
+    "x402-policy": "./dist/scripts/policy-cli.js"
   },
   "files": [
     "dist",

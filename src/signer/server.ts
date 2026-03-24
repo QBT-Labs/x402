@@ -7,12 +7,14 @@ import { createServer, Server, Socket } from 'net';
 import { existsSync, unlinkSync } from 'fs';
 import { Vault, wipeBuffer } from '../vault/index.js';
 import { signEIP3009 } from '../chains/evm.js';
+import { PolicyEngine } from '../policy/engine.js';
 import type { SignRequest, SignResponse, SignPayload, SignerConfig } from './types.js';
 import { DEFAULT_SOCKET_PATH } from './types.js';
 
 export class SignerServer {
   private server: Server | null = null;
   private vault: Vault;
+  private policy: PolicyEngine;
   private socketPath: string;
   private password: string;
   private isRunning = false;
@@ -21,6 +23,7 @@ export class SignerServer {
     this.socketPath = config.socketPath || DEFAULT_SOCKET_PATH;
     this.password = config.password;
     this.vault = new Vault({ vaultPath: config.vaultPath });
+    this.policy = new PolicyEngine(config.policyPath);
 
     if (!this.vault.exists()) {
       throw new Error('Vault not found. Run "x402 vault init" first.');
@@ -152,6 +155,30 @@ export class SignerServer {
    * Handle signing request
    */
   private async handleSign(id: string, payload: SignPayload): Promise<SignResponse> {
+    // Check policy BEFORE decrypting key
+    const policyResult = await this.policy.check({
+      to: payload.to,
+      amount: payload.amount,
+      chainId: payload.chainId,
+    });
+
+    if (!policyResult.allowed) {
+      return {
+        id,
+        success: false,
+        error: `Policy violation: ${policyResult.reason}`,
+      };
+    }
+
+    if (policyResult.requiresApproval) {
+      // TODO: Implement approval flow
+      return {
+        id,
+        success: false,
+        error: 'Transaction requires manual approval (not yet implemented)',
+      };
+    }
+
     // Decrypt private key
     const privateKey = this.vault.decrypt(this.password);
 
@@ -165,6 +192,16 @@ export class SignerServer {
         validBefore: payload.validBefore || Math.floor(Date.now() / 1000) + 3600,
         nonce: payload.nonce ? BigInt(payload.nonce) : undefined,
         chainId: payload.chainId,
+      });
+
+      // Record transaction in spending tracker
+      this.policy.recordTransaction({
+        id,
+        timestamp: new Date().toISOString(),
+        to: payload.to,
+        amount: payload.amount,
+        chainId: payload.chainId,
+        status: 'completed',
       });
 
       return {

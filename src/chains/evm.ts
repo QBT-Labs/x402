@@ -90,3 +90,76 @@ function verifyBasic(
 export function getUsdcAddress(chainId: string): string | undefined {
   return USDC_CONTRACTS[chainId];
 }
+
+/**
+ * EIP-3009 TypedData types for signing
+ */
+const EIP3009_TYPES = {
+  TransferWithAuthorization: [
+    { name: 'from', type: 'address' },
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'validAfter', type: 'uint256' },
+    { name: 'validBefore', type: 'uint256' },
+    { name: 'nonce', type: 'bytes32' },
+  ],
+} as const;
+
+export interface SignEIP3009Options {
+  privateKey: string;
+  to: string;
+  value: bigint;
+  validAfter: number;
+  validBefore: number;
+  nonce?: bigint;
+  chainId: number;
+}
+
+/**
+ * Sign an EIP-3009 TransferWithAuthorization message
+ */
+export async function signEIP3009(options: SignEIP3009Options): Promise<string> {
+  const { privateKeyToAccount } = await import('viem/accounts');
+  const { randomBytes } = await import('crypto');
+  
+  const account = privateKeyToAccount(options.privateKey as `0x${string}`);
+  
+  // Generate nonce if not provided
+  const nonce = options.nonce 
+    ? `0x${options.nonce.toString(16).padStart(64, '0')}`
+    : `0x${randomBytes(32).toString('hex')}`;
+  
+  // Get USDC contract address for the chain
+  const usdcAddress = getUsdcAddress(options.chainId.toString());
+  if (!usdcAddress) {
+    throw new Error(`Unknown chain ID: ${options.chainId}`);
+  }
+  
+  // Build the domain
+  const domain = {
+    name: 'USD Coin',
+    version: '2',
+    chainId: options.chainId,
+    verifyingContract: usdcAddress as `0x${string}`,
+  };
+  
+  // Build the message
+  const message = {
+    from: account.address,
+    to: options.to as `0x${string}`,
+    value: options.value,
+    validAfter: BigInt(options.validAfter),
+    validBefore: BigInt(options.validBefore),
+    nonce: nonce as `0x${string}`,
+  };
+  
+  // Sign the typed data
+  const signature = await account.signTypedData({
+    domain,
+    types: EIP3009_TYPES,
+    primaryType: 'TransferWithAuthorization',
+    message,
+  });
+  
+  return signature;
+}

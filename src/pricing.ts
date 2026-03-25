@@ -60,15 +60,15 @@ export function buildPaymentRequirements(priceUsd: number): {
   accepts: Array<{
     network: string;
     asset: string;
-    amount: string;
+    maxAmountRequired: string;
     payTo: string;
   }>;
 } {
   const cfg = getConfig();
   const chains = getActiveChains();
-  const accepts: Array<{ network: string; asset: string; amount: string; payTo: string }> = [];
+  const accepts: Array<{ network: string; asset: string; maxAmountRequired: string; payTo: string }> = [];
 
-  const amount = Math.ceil(priceUsd * 1_000_000).toString();
+  const maxAmountRequired = Math.ceil(priceUsd * 1_000_000).toString();
 
   for (const chain of chains) {
     const asset = USDC_CONTRACTS[chain];
@@ -84,7 +84,7 @@ export function buildPaymentRequirements(priceUsd: number): {
     }
 
     if (payTo) {
-      accepts.push({ network: chain, asset, amount, payTo });
+      accepts.push({ network: chain, asset, maxAmountRequired, payTo });
     }
   }
 

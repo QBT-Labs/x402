@@ -18,11 +18,24 @@ export interface JWTClaims {
 }
 
 /**
+ * Signer interface for isolated key management.
+ * Allows signing without exposing the private key.
+ */
+export interface PaymentSigner {
+  /** Wallet address */
+  address: string;
+  /** Sign a payment (key stays isolated) */
+  sign(payload: { to: string; amount: string; chainId: number }): Promise<string>;
+}
+
+/**
  * Options for creating a split execution payment client.
  */
 export interface SplitClientOptions {
   /** Agent's wallet private key (hex, 0x-prefixed). Never sent to server. */
-  privateKey: `0x${string}`;
+  privateKey?: `0x${string}`;
+  /** Isolated signer (alternative to privateKey). */
+  signer?: PaymentSigner;
   /** Worker URL (e.g. https://mcp.openmm.io) */
   workerUrl: string;
   /** Override chain ID (default: derived from testnet flag) */
@@ -36,7 +49,9 @@ export interface SplitClientOptions {
  */
 export interface SplitPaymentGateOptions {
   /** Agent's wallet private key (hex, 0x-prefixed). */
-  privateKey: `0x${string}`;
+  privateKey?: `0x${string}`;
+  /** Isolated signer (alternative to privateKey). */
+  signer?: PaymentSigner;
   /** Worker URL (e.g. https://mcp.openmm.io) */
   workerUrl: string;
   /** Use testnet chains. Default false. */

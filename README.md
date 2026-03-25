@@ -8,37 +8,67 @@ Multi-chain payment protocol for AI agents. Enable pay-per-call monetization for
 
 ## Architecture
 
-The x402 payment system uses a three-layer proxy architecture:
+The x402 payment system uses a secure multi-layer architecture with process isolation:
 
 ```mermaid
 sequenceDiagram
     participant Client as MCP Client<br/>(Claude/Cursor/Windsurf)
-    participant Proxy as x402 Proxy<br/>(Local)
-    participant Server as MCP Server<br/>(mcp.openmm.io)
+    participant MCP as MCP Server<br/>(Local)
+    participant Vault as Encrypted Vault<br/>(~/.x402/vault.enc)
+    participant Signer as x402 Signer<br/>(Isolated Process)
+    participant Policy as Policy Engine<br/>(Spending Limits)
+    participant Server as Payment Server<br/>(mcp.openmm.io)
     participant Facilitator as x402.org<br/>(Facilitator)
     participant Chain as Base L2<br/>(USDC)
 
-    Client->>Proxy: 1. tools/call (get_ticker)
-    Proxy->>Server: 2. Forward request
-    Server-->>Proxy: 3. HTTP 402 + requirements
-    Proxy->>Proxy: 4. Sign payment (EIP-3009)
-    Proxy->>Facilitator: 5. Submit payment
-    Facilitator->>Chain: 6. Execute transfer
-    Chain-->>Facilitator: 7. Confirm tx
-    Facilitator-->>Proxy: 8. Payment receipt
-    Proxy->>Server: 9. Retry with X-PAYMENT header
-    Server->>Facilitator: 10. Verify payment
-    Server-->>Proxy: 11. Tool result
-    Proxy-->>Client: 12. Return data
+    Note over Vault,Signer: Startup (once)
+    Signer->>Vault: 1. Unlock vault (password)
+    Vault-->>Signer: 2. Decrypted keys (in memory)
+    
+    Note over Client,Chain: Tool Call Flow
+    Client->>MCP: 3. tools/call (get_ticker)
+    MCP->>Server: 4. Forward request
+    Server-->>MCP: 5. HTTP 402 + requirements
+    
+    Note over MCP,Policy: Security Checks
+    MCP->>Policy: 6. Check spending limits
+    Policy-->>MCP: 7. Approved ✓
+    
+    Note over MCP,Signer: Isolated Signing
+    MCP->>Signer: 8. Sign request (IPC)
+    Signer->>Signer: 9. Sign EIP-3009
+    Signer-->>MCP: 10. Signature only
+    
+    Note over MCP,Chain: Payment Settlement
+    MCP->>Facilitator: 11. Submit payment
+    Facilitator->>Chain: 12. Execute USDC transfer
+    Chain-->>Facilitator: 13. Confirm tx
+    Facilitator-->>MCP: 14. Payment receipt
+    
+    MCP->>Server: 15. Retry with X-PAYMENT
+    Server->>Facilitator: 16. Verify payment
+    Server-->>MCP: 17. Tool result
+    MCP-->>Client: 18. Return data
 ```
 
-### Three-Layer Model
+### Key Security Features
 
-| Layer | Component | Role |
-|-------|-----------|------|
-| **Client** | `npx @qbtlabs/x402 client-proxy` | Intercepts 402s, signs payments, retries |
-| **Server** | `withX402Server()` middleware | Returns 402s, verifies payments, settles |
-| **Facilitator** | x402.org | Executes on-chain transfers |
+| Layer | Component | Protection |
+|-------|-----------|------------|
+| **Encrypted Vault** | `~/.x402/vault.enc` | Keys encrypted at rest (AES-256-GCM) |
+| **Process Isolation** | `x402-signer` | Keys never enter AI agent memory |
+| **Policy Engine** | `~/.x402/policy.json` | Spending limits enforced before signing |
+| **IPC** | Unix socket | Only signatures cross process boundary |
+
+### Components
+
+| Component | Role |
+|-----------|------|
+| **MCP Client** | Claude, Cursor, Windsurf — initiates tool calls |
+| **MCP Server** | Local server wrapping tools with x402 |
+| **x402 Signer** | Isolated process holding private keys |
+| **Policy Engine** | Enforces spending limits and allowlists |
+| **Facilitator** | x402.org — executes on-chain transfers |
 
 ## Security Architecture (v0.4.0+)
 

@@ -74,11 +74,6 @@ export function buildFacilitatorRequirements(toolName: string): {
 /**
  * Verify payment via the facilitator service
  */
-// Debug: Log what we send to facilitator
-function logFacilitatorRequest(label: string, data: unknown) {
-  console.log(`[x402-facilitator] ${label}:`, JSON.stringify(data, null, 2));
-}
-
 export async function verifyWithFacilitator(
   payment: PaymentPayload,
   toolName: string
@@ -95,18 +90,14 @@ export async function verifyWithFacilitator(
   }
 
   try {
-    const requestBody = {
-      x402Version: payment.x402Version ?? 2,
-      paymentPayload: payment,
-      paymentRequirements: matchingRequirement,
-    };
-    
-    logFacilitatorRequest('verify request', requestBody);
-    
     const response = await fetch(`${facilitatorUrl}/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({
+        x402Version: payment.x402Version ?? 2,
+        paymentPayload: payment,
+        paymentRequirements: matchingRequirement,
+      }),
     });
 
     if (!response.ok) {

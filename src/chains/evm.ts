@@ -173,6 +173,10 @@ export async function signEIP3009(options: SignEIP3009Options): Promise<SignEIP3
     nonce: nonce as `0x${string}`,
   };
   
+  // Debug: Log what we're signing
+  console.log('[x402-sign] Domain:', JSON.stringify(domain));
+  console.log('[x402-sign] Message:', JSON.stringify(message, (_, v) => typeof v === 'bigint' ? v.toString() : v));
+  
   // Sign the typed data
   const signature = await account.signTypedData({
     domain,
@@ -180,6 +184,8 @@ export async function signEIP3009(options: SignEIP3009Options): Promise<SignEIP3
     primaryType: 'TransferWithAuthorization',
     message,
   });
+  
+  console.log('[x402-sign] Signature:', signature.slice(0, 20) + '...');
   
   return {
     signature,

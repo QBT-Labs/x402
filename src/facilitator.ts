@@ -61,7 +61,10 @@ export function buildFacilitatorRequirements(toolName: string): {
       amount: amountMicro,
       maxTimeoutSeconds: 300,
       payTo,
-      extra: chain.startsWith('eip155:') ? { name: 'USD Coin', version: '2' } : undefined,
+      extra: chain.startsWith('eip155:') ? { 
+        name: chain === 'eip155:84532' ? 'USDC' : 'USD Coin', 
+        version: '2' 
+      } : undefined,
     });
   }
 
@@ -71,6 +74,11 @@ export function buildFacilitatorRequirements(toolName: string): {
 /**
  * Verify payment via the facilitator service
  */
+// Debug: Log what we send to facilitator
+function logFacilitatorRequest(label: string, data: unknown) {
+  console.log(`[x402-facilitator] ${label}:`, JSON.stringify(data, null, 2));
+}
+
 export async function verifyWithFacilitator(
   payment: PaymentPayload,
   toolName: string
@@ -87,14 +95,18 @@ export async function verifyWithFacilitator(
   }
 
   try {
+    const requestBody = {
+      x402Version: payment.x402Version ?? 2,
+      paymentPayload: payment,
+      paymentRequirements: matchingRequirement,
+    };
+    
+    logFacilitatorRequest('verify request', requestBody);
+    
     const response = await fetch(`${facilitatorUrl}/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        x402Version: payment.x402Version ?? 2,
-        paymentPayload: payment,
-        paymentRequirements: matchingRequirement,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {

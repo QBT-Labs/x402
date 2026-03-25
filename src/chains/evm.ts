@@ -88,7 +88,13 @@ function verifyBasic(
  * Get USDC contract address for a given chain
  */
 export function getUsdcAddress(chainId: string): string | undefined {
-  return USDC_CONTRACTS[chainId];
+  // Try direct lookup first (e.g., "eip155:8453")
+  if (USDC_CONTRACTS[chainId]) {
+    return USDC_CONTRACTS[chainId];
+  }
+  // Try with eip155 prefix (e.g., "8453" -> "eip155:8453")
+  const eipChainId = `eip155:${chainId}`;
+  return USDC_CONTRACTS[eipChainId];
 }
 
 /**

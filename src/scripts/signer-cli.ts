@@ -43,10 +43,14 @@ async function prompt(question: string, hidden = false): Promise<string> {
             process.exit();
             break;
           case '\u007F':
-            password = password.slice(0, -1);
+            if (password.length > 0) {
+              password = password.slice(0, -1);
+              process.stdout.write('\b \b'); // Erase last *
+            }
             break;
           default:
             password += c;
+            process.stdout.write('*'); // Show * instead of character
             break;
         }
       };

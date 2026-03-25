@@ -137,6 +137,45 @@ export function buildPaymentPayload(signedPayment: SignedPayment): string {
 }
 
 /**
+ * Build payment payload from a pre-signed signature (for isolated signer mode)
+ */
+export function buildPaymentPayloadFromSignature(params: {
+  signature: string;
+  from: string;
+  to: string;
+  amount: string;
+  chainId: number;
+}): string {
+  const { signature, from, to, amount, chainId } = params;
+  const network = `eip155:${chainId}`;
+  const now = Math.floor(Date.now() / 1000);
+  
+  const payload = {
+    x402Version: 2,
+    payload: {
+      authorization: {
+        from,
+        to,
+        value: amount,
+        validAfter: '0',
+        validBefore: String(now + 300),
+        nonce: '0x' + crypto.randomUUID().replace(/-/g, '').padEnd(64, '0'),
+      },
+      signature,
+    },
+    accepted: {
+      network,
+      asset: chainId === 84532
+        ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+        : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      amount,
+      payTo: to,
+    },
+  };
+  return Buffer.from(JSON.stringify(payload)).toString('base64');
+}
+
+/**
  * Parse 402 response and extract payment requirements
  */
 export function parsePaymentRequired(response: {

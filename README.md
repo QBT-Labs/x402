@@ -8,37 +8,133 @@ Multi-chain payment protocol for AI agents. Enable pay-per-call monetization for
 
 ## Architecture
 
-The x402 payment system uses a three-layer proxy architecture:
+The x402 payment system uses a secure 6-layer architecture with process isolation:
 
 ```mermaid
 sequenceDiagram
-    participant Client as MCP Client<br/>(Claude/Cursor/Windsurf)
-    participant Proxy as x402 Proxy<br/>(Local)
-    participant Server as MCP Server<br/>(mcp.openmm.io)
-    participant Facilitator as x402.org<br/>(Facilitator)
-    participant Chain as Base L2<br/>(USDC)
+    autonumber
 
-    Client->>Proxy: 1. tools/call (get_ticker)
-    Proxy->>Server: 2. Forward request
-    Server-->>Proxy: 3. HTTP 402 + requirements
-    Proxy->>Proxy: 4. Sign payment (EIP-3009)
-    Proxy->>Facilitator: 5. Submit payment
-    Facilitator->>Chain: 6. Execute transfer
-    Chain-->>Facilitator: 7. Confirm tx
-    Facilitator-->>Proxy: 8. Payment receipt
-    Proxy->>Server: 9. Retry with X-PAYMENT header
-    Server->>Facilitator: 10. Verify payment
-    Server-->>Proxy: 11. Tool result
-    Proxy-->>Client: 12. Return data
+    participant Client as 🤖 MCP Client<br/>(Claude/Cursor)
+    participant Vault as 🔐 Encrypted Vault<br/>(~/.x402/vault.enc)
+    participant Signer as 🔏 x402 Signer<br/>(Isolated Process)
+    participant Policy as 📋 Policy Engine<br/>(~/.x402/policy.json)
+    participant Proxy as 🔄 x402 Proxy<br/>(Local)
+    participant Server as ☁️ MCP Server<br/>(mcp.openmm.io)
+    participant KMS as 🔑 AWS KMS<br/>(ES256)
+    participant Facilitator as 💳 x402.org<br/>(Facilitator)
+    participant Chain as ⛓️ Base L2<br/>(USDC)
+
+    %% PHASE 1 — CLIENT SECURITY (Startup)
+    rect rgb(232, 245, 233)
+    Note over Vault, Signer: 🛡️ PHASE 1 — Client Security (Startup)
+
+    Signer->>Vault: Unlock vault with password
+    Note right of Vault: AES-256-GCM + PBKDF2<br/>decryption
+
+    Vault-->>Signer: Private key decrypted
+    Note right of Signer: Keys loaded in isolated<br/>memory — NEVER in<br/>agent process
+
+    Note over Client, Signer: 🔒 SECURITY LAYER 1: Encrypted Vault (AES-256-GCM)<br/>~/.x402/vault.enc → wallet private key (payments)<br/>🔒 SECURITY LAYER 2: Process Isolation (keys never in agent memory)
+    end
+
+    %% PHASE 2 — TOOL CALL + PAYMENT
+    rect rgb(227, 242, 253)
+    Note over Client, Facilitator: 💰 PHASE 2 — Tool Call + Payment
+
+    Client->>Proxy: tools/call (get_ticker)
+    Proxy->>Server: Forward request
+    Server-->>Proxy: HTTP 402 + payment requirements<br/>(payTo, amount, chainId)
+
+    Proxy->>Policy: Check spending limits
+    Note right of Policy: maxSpendPerTx: 10 USDC<br/>maxSpendPerDay: 100 USDC<br/>allowedChains: [base]<br/>allowedRecipients: [0x...]
+
+    alt Policy REJECTED
+        Policy-->>Proxy: ❌ Limit exceeded / recipient blocked
+        Proxy-->>Client: Error: Payment policy denied
+    else Policy APPROVED
+        Policy-->>Proxy: ✅ Approved (within limits)
+    end
+
+    Note over Policy: 🔒 SECURITY LAYER 3: Policy Engine<br/>(spending limits, allowlists, audit log)
+
+    Proxy->>Signer: Request signature (IPC)
+    Note right of Signer: Sign EIP-3009<br/>TransferWithAuthorization<br/>(gasless)
+    Signer-->>Proxy: Signature only (key stays in signer)
+
+    Proxy->>Server: Retry with X-PAYMENT header
+    end
+
+    %% PHASE 3 — ON-CHAIN SETTLEMENT
+    rect rgb(255, 243, 224)
+    Note over Server, Chain: ⛓️ PHASE 3 — On-Chain Settlement
+
+    Server->>Facilitator: Settlement request<br/>(payment payload)
+    Facilitator->>Chain: Execute USDC transfer<br/>(EIP-3009 authorization)
+    Chain-->>Facilitator: Transaction confirmed ✅
+    Facilitator-->>Server: Payment receipt + tx hash
+
+    Note over Chain: 🔒 SECURITY LAYER 4: On-chain settlement<br/>(verifiable, immutable, Base L2)
+    end
+
+    %% PHASE 4 — JWT ISSUANCE (post-settlement)
+    rect rgb(237, 231, 246)
+    Note over Server, KMS: 🔑 PHASE 4 — JWT Issuance (post-settlement receipt)
+
+    Note right of Server: Payment confirmed on-chain ✅<br/>tx hash available → embed in JWT
+
+    Server->>KMS: Sign JWT (ES256)
+    Note right of KMS: JWT Payload:<br/>{user_id, exchange,<br/>tool, payment_tx, exp}<br/>↑ payment_tx = on-chain proof
+    KMS-->>Server: Signed JWT
+
+    Note over KMS: 🔒 SECURITY LAYER 5: AWS KMS JWT signing<br/>(keys never leave HSM, ES256)
+
+    Server-->>Proxy: JWT (proof-of-payment receipt)
+    Proxy-->>Client: Forward JWT to client
+    end
+
+    %% PHASE 5 — AUTHENTICATED LOCAL EXECUTION
+    rect rgb(252, 228, 236)
+    Note over Client, Proxy: 🚀 PHASE 5 — Authenticated Local Execution
+
+    Client->>Proxy: Tool request + JWT
+    Proxy->>Proxy: Verify JWT signature (cached public key)
+
+    alt JWT INVALID
+        Proxy-->>Client: ❌ Error: Invalid or expired JWT
+    else JWT VALID
+        Proxy->>Proxy: Decrypt exchange API keys<br/>from ~/.openmm/vault.enc
+        Note right of Proxy: Exchange keys encrypted<br/>in ~/.openmm/vault.enc<br/>(AES-256-GCM)<br/>NEVER sent to cloud<br/>NEVER exposed to AI agent
+
+        Proxy->>Proxy: Execute on exchange API (MEXC/Binance/etc)
+        Proxy-->>Client: Return ticker data to Claude
+    end
+
+    Note over Proxy: 🔒 SECURITY LAYER 6: Local API Key Isolation<br/>(encrypted in ~/.openmm/vault.enc,<br/>NEVER sent to cloud,<br/>NEVER exposed to AI agent)
+    end
+
+    %% SECURITY SUMMARY
+    Note over Client, Chain: ══════════ SECURITY LAYERS SUMMARY ══════════<br/>Layer 1: Encrypted Vault (~/.x402/vault.enc — wallet key, AES-256-GCM)<br/>Layer 2: Process Isolation (keys never in agent memory)<br/>Layer 3: Policy Engine (spending limits, allowlists, audit)<br/>Layer 4: On-chain Settlement (verifiable, immutable)<br/>Layer 5: AWS KMS JWT Signing (HSM-backed, post-settlement)<br/>Layer 6: Local API Key Isolation (encrypted vault + never leaves machine)
 ```
 
-### Three-Layer Model
+### 6 Security Layers
 
-| Layer | Component | Role |
-|-------|-----------|------|
-| **Client** | `npx @qbtlabs/x402 client-proxy` | Intercepts 402s, signs payments, retries |
-| **Server** | `withX402Server()` middleware | Returns 402s, verifies payments, settles |
-| **Facilitator** | x402.org | Executes on-chain transfers |
+| Layer | Component | Protection |
+|-------|-----------|------------|
+| **1. Encrypted Vault** | `~/.x402/vault.enc` | Wallet key encrypted at rest (AES-256-GCM + PBKDF2) |
+| **2. Process Isolation** | `x402-signer` | Keys never enter AI agent process memory |
+| **3. Policy Engine** | `~/.x402/policy.json` | Spending limits, allowlists, audit logging |
+| **4. On-chain Settlement** | Base L2 | Verifiable, immutable USDC transfers |
+| **5. AWS KMS JWT** | ES256 signing | Server keys never leave HSM |
+| **6. Local API Keys** | `~/.openmm/vault.enc` | Exchange credentials encrypted, never sent to cloud |
+
+### Two Vaults
+
+| Vault | Path | Contents |
+|-------|------|----------|
+| **x402 Vault** | `~/.x402/vault.enc` | Wallet private key (for payments) |
+| **OpenMM Vault** | `~/.openmm/vault.enc` | Exchange API keys (for trading) |
+
+Both use AES-256-GCM encryption with PBKDF2 key derivation.
 
 ## Security Architecture (v0.4.0+)
 

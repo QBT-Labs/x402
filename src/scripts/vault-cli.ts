@@ -11,55 +11,72 @@ const args = process.argv.slice(2);
 const command = args[0];
 
 async function prompt(question: string, hidden = false): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  if (hidden && process.stdin.isTTY) {
+    // Use muted output for password
+    const rl = createInterface({
+      input: process.stdin,
+      output: new (await import('stream')).Writable({
+        write: (_chunk, _encoding, callback) => callback()
+      }),
+      terminal: true,
+    });
 
-  return new Promise((resolve) => {
-    if (hidden && process.stdin.isTTY) {
-      // For password input, we need to handle it differently
-      process.stdout.write(question);
-      
-      const stdin = process.stdin;
-      stdin.setRawMode?.(true);
-      stdin.resume();
-      stdin.setEncoding('utf8');
-      
+    process.stdout.write(question);
+    
+    return new Promise((resolve) => {
       let password = '';
+      
+      process.stdin.setRawMode?.(true);
+      process.stdin.resume();
+      process.stdin.setEncoding('utf8');
+      
       const onData = (char: string) => {
-        const c = char.toString();
-        switch (c) {
+        switch (char) {
           case '\n':
           case '\r':
           case '\u0004': // Ctrl+D
-            stdin.setRawMode?.(false);
-            stdin.removeListener('data', onData);
-            stdin.pause();
+            process.stdin.setRawMode?.(false);
+            process.stdin.removeListener('data', onData);
+            process.stdin.pause();
             process.stdout.write('\n');
             rl.close();
             resolve(password);
             break;
           case '\u0003': // Ctrl+C
-            process.exit();
+            process.stdout.write('\n');
+            process.exit(0);
             break;
           case '\u007F': // Backspace
-            password = password.slice(0, -1);
+          case '\b':
+            if (password.length > 0) {
+              password = password.slice(0, -1);
+              process.stdout.write('\b \b');
+            }
             break;
           default:
-            password += c;
+            if (char.charCodeAt(0) >= 32) { // Printable chars only
+              password += char;
+              process.stdout.write('*');
+            }
             break;
         }
       };
       
-      stdin.on('data', onData);
-    } else {
+      process.stdin.on('data', onData);
+    });
+  } else {
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    
+    return new Promise((resolve) => {
       rl.question(question, (answer) => {
         rl.close();
         resolve(answer);
       });
-    }
-  });
+    });
+  }
 }
 
 async function getPassword(confirmMessage?: string): Promise<string> {

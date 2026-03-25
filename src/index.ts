@@ -56,7 +56,7 @@ export {
 } from './facilitator.js';
 
 // Client (for agents)
-export { signPayment, buildPaymentPayload, parsePaymentRequired } from './client.js';
+export { signPayment, buildPaymentPayload, buildPaymentPayloadFromSignature, parsePaymentRequired } from './client.js';
 
 // Transport
 export { createPaymentFetch } from './transport/payment-fetch.js';
@@ -80,6 +80,7 @@ export type {
   SplitClientOptions,
   SplitPaymentGateOptions,
   PaymentRequirements,
+  PaymentSigner,
 } from './split/types.js';
 
 // Chain modules (for direct access)
@@ -93,3 +94,35 @@ export type {
   VaultInitOptions,
   VaultImportOptions,
 } from './vault/index.js';
+
+// Signer (process isolation)
+export {
+  SignerServer,
+  startSignerServer,
+  SignerClient,
+  createSignerClient,
+  signWithIsolatedSigner,
+} from './signer/index.js';
+export type {
+  SignRequest,
+  SignResponse,
+  SignPayload,
+  SignerConfig,
+} from './signer/index.js';
+
+// Policy (spending limits)
+export {
+  PolicyEngine,
+  createPolicyEngine,
+  SpendingTracker,
+  AuditLogger,
+  formatUSDC,
+  parseUSDC,
+} from './policy/index.js';
+export type {
+  PolicyConfig,
+  PolicyRules,
+  PolicyCheckResult,
+  TransactionRecord,
+  AmountLimit,
+} from './policy/index.js';

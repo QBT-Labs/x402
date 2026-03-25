@@ -9,7 +9,7 @@
  * Wallet private key never leaves the local machine.
  */
 
-import { signPayment, buildPaymentPayload } from '../client.js';
+import { signPayment, buildPaymentPayload, buildPaymentPayloadFromSignature } from '../client.js';
 import { verifyJWT, clearPublicKeyCache } from './jwt.js';
 import type { JWTClaims, SplitClientOptions, PaymentRequirements } from './types.js';
 
@@ -38,9 +38,14 @@ export interface SplitClient {
  * ```
  */
 export function createSplitClient(options: SplitClientOptions): SplitClient {
-  const { privateKey, workerUrl, testnet = false } = options;
+  const { privateKey, signer, workerUrl, testnet = false } = options;
   const chainId = options.chainId ?? (testnet ? 84532 : 8453);
   const publicKeyUrl = `${workerUrl}/jwt-public-key`;
+
+  // Validate that we have either privateKey or signer
+  if (!privateKey && !signer) {
+    throw new Error('Either privateKey or signer must be provided');
+  }
 
   return {
     async requestJWT({ exchange, tool }) {
@@ -70,20 +75,41 @@ export function createSplitClient(options: SplitClientOptions): SplitClient {
       const req = accepts[0];
       if (!req) throw new Error('No payment requirements in 402 response');
 
-      // Step 3: Sign EIP-3009 using x402 core client
+      // Step 3: Sign EIP-3009 using x402 core client OR isolated signer
       const payTo = req.payTo as `0x${string}`;
       const amount = parseInt(req.maxAmountRequired) / 1_000_000;
+      const amountWei = req.maxAmountRequired;
       const reqChainId = req.extra?.chainId ?? chainId;
 
-      const signed = await signPayment({
-        privateKey,
-        to: payTo,
-        amount,
-        chainId: reqChainId,
-        validForSeconds: 300,
-      });
+      let paymentHeader: string;
 
-      const paymentHeader = buildPaymentPayload(signed);
+      if (signer) {
+        // Use isolated signer (key never leaves signer process)
+        const signature = await signer.sign({
+          to: payTo,
+          amount: amountWei,
+          chainId: reqChainId,
+        });
+        
+        // Build payment payload with signature from signer
+        paymentHeader = buildPaymentPayloadFromSignature({
+          signature,
+          from: signer.address,
+          to: payTo,
+          amount: amountWei,
+          chainId: reqChainId,
+        });
+      } else {
+        // Use direct private key (legacy mode)
+        const signed = await signPayment({
+          privateKey: privateKey!,
+          to: payTo,
+          amount,
+          chainId: reqChainId,
+          validForSeconds: 300,
+        });
+        paymentHeader = buildPaymentPayload(signed);
+      }
 
       // Step 4: Retry with X-PAYMENT header → get JWT
       const paidRes = await fetch(url, {

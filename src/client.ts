@@ -111,8 +111,15 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
  * Build payment payload for x402 header
  */
 export function buildPaymentPayload(signedPayment: SignedPayment): string {
+  const asset = signedPayment.network === 'eip155:84532'
+    ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+    : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    
+  // Build payload in the format expected by x402.org facilitator
   const payload = {
     x402Version: 2,
+    scheme: 'exact',
+    network: signedPayment.network,
     payload: {
       authorization: {
         from: signedPayment.from,
@@ -124,11 +131,11 @@ export function buildPaymentPayload(signedPayment: SignedPayment): string {
       },
       signature: signedPayment.signature,
     },
+    // Also include accepted for compatibility
     accepted: {
+      scheme: 'exact',
       network: signedPayment.network,
-      asset: signedPayment.network === 'eip155:84532'
-        ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-        : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      asset,
       amount: signedPayment.value,
       payTo: signedPayment.to,
     },
@@ -148,10 +155,16 @@ export function buildPaymentPayloadFromSignature(params: {
 }): string {
   const { signature, from, to, amount, chainId } = params;
   const network = `eip155:${chainId}`;
+  const asset = chainId === 84532
+    ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+    : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
   const now = Math.floor(Date.now() / 1000);
   
+  // Build payload in the format expected by x402.org facilitator
   const payload = {
     x402Version: 2,
+    scheme: 'exact',
+    network,
     payload: {
       authorization: {
         from,
@@ -163,11 +176,11 @@ export function buildPaymentPayloadFromSignature(params: {
       },
       signature,
     },
+    // Also include accepted for compatibility
     accepted: {
+      scheme: 'exact',
       network,
-      asset: chainId === 84532
-        ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-        : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      asset,
       amount,
       payTo: to,
     },

@@ -80,8 +80,11 @@ export function createSplitClient(options: SplitClientOptions): SplitClient {
 
       // Step 3: Sign EIP-3009 using x402 core client OR isolated signer
       const payTo = req.payTo as `0x${string}`;
-      const amount = parseInt(req.maxAmountRequired) / 1_000_000;
-      const amountWei = req.maxAmountRequired;
+      // Support both V2 (amount) and V1 (maxAmountRequired) field names
+      const amountStr = req.amount || req.maxAmountRequired;
+      if (!amountStr) throw new Error('No amount in payment requirements');
+      const amount = parseInt(amountStr) / 1_000_000;
+      const amountWei = amountStr;
       const reqChainId = req.extra?.chainId ?? chainId;
 
       let paymentHeader: string;

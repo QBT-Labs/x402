@@ -68,7 +68,8 @@ export interface SplitPaymentGateOptions {
 export interface PaymentRequirements {
   scheme: string;
   network: string;
-  maxAmountRequired: string;
+  amount?: string;           // V2 field
+  maxAmountRequired?: string; // V1 field (backwards compat)
   payTo: string;
   extra?: {
     name: string;

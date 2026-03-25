@@ -144,8 +144,10 @@ export function wrapWithSplitPayment(server: McpServer, options: SplitPaymentGat
   const { freeTools = [] } = options;
   const freeSet = new Set(freeTools);
 
+  // Support both privateKey and signer modes
   const client: SplitClient = createSplitClient({
     privateKey: options.privateKey,
+    signer: options.signer,
     workerUrl: options.workerUrl,
     testnet: options.testnet,
   });

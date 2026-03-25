@@ -56,7 +56,7 @@ export {
 } from './facilitator.js';
 
 // Client (for agents)
-export { signPayment, buildPaymentPayload, parsePaymentRequired } from './client.js';
+export { signPayment, buildPaymentPayload, buildPaymentPayloadFromSignature, parsePaymentRequired } from './client.js';
 
 // Transport
 export { createPaymentFetch } from './transport/payment-fetch.js';
@@ -80,6 +80,7 @@ export type {
   SplitClientOptions,
   SplitPaymentGateOptions,
   PaymentRequirements,
+  PaymentSigner,
 } from './split/types.js';
 
 // Chain modules (for direct access)

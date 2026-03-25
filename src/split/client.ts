@@ -38,7 +38,7 @@ export interface SplitClient {
  * ```
  */
 export function createSplitClient(options: SplitClientOptions): SplitClient {
-  const { privateKey, signer, workerUrl, testnet = false } = options;
+  const { privateKey, signer, workerUrl, testnet = false, skipJwtVerification = false } = options;
   const chainId = options.chainId ?? (testnet ? 84532 : 8453);
   const publicKeyUrl = `${workerUrl}/jwt-public-key`;
 
@@ -46,6 +46,9 @@ export function createSplitClient(options: SplitClientOptions): SplitClient {
   if (!privateKey && !signer) {
     throw new Error('Either privateKey or signer must be provided');
   }
+
+  // In testnet or when skipJwtVerification is set, we can skip JWT verification
+  const shouldSkipJwtVerification = skipJwtVerification || testnet;
 
   return {
     async requestJWT({ exchange, tool }) {
@@ -129,7 +132,19 @@ export function createSplitClient(options: SplitClientOptions): SplitClient {
       return { jwt: data.jwt };
     },
 
-    verifyJWT(token: string) {
+    async verifyJWT(token: string): Promise<JWTClaims> {
+      if (shouldSkipJwtVerification) {
+        // In testnet mode, parse JWT without cryptographic verification
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+          throw new Error('Invalid JWT: expected 3 parts');
+        }
+        const payloadB64 = parts[1];
+        // Handle URL-safe base64
+        const normalized = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(Buffer.from(normalized, 'base64').toString('utf-8'));
+        return payload as JWTClaims;
+      }
       return verifyJWT(token, publicKeyUrl);
     },
 

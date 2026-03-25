@@ -42,6 +42,8 @@ export interface SplitClientOptions {
   chainId?: number;
   /** Use testnet chains (Base Sepolia). Default false. */
   testnet?: boolean;
+  /** Skip JWT cryptographic verification. Default false, auto-enabled on testnet. */
+  skipJwtVerification?: boolean;
 }
 
 /**

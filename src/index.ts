@@ -84,3 +84,12 @@ export type {
 
 // Chain modules (for direct access)
 export * as chains from './chains/index.js';
+
+// Vault (encrypted key storage)
+export { Vault, wipeBuffer, validatePrivateKey } from './vault/index.js';
+export type {
+  VaultFile,
+  VaultConfig,
+  VaultInitOptions,
+  VaultImportOptions,
+} from './vault/index.js';

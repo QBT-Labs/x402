@@ -33,11 +33,16 @@
     "./split": {
       "types": "./dist/split/index.d.ts",
       "import": "./dist/split/index.js"
+    },
+    "./vault": {
+      "types": "./dist/vault/index.d.ts",
+      "import": "./dist/vault/index.js"
     }
   },
   "bin": {
     "qbtlabs-x402": "./dist/scripts/client-proxy.js",
-    "x402-proxy": "./dist/scripts/client-proxy.js"
+    "x402-proxy": "./dist/scripts/client-proxy.js",
+    "x402-vault": "./dist/scripts/vault-cli.js"
   },
   "files": [
     "dist",

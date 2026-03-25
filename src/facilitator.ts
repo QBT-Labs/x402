@@ -9,37 +9,18 @@ import type { PaymentPayload } from './verify.js';
 import { getConfig, getActiveChains, USDC_CONTRACTS } from './config.js';
 import { getToolPrice } from './pricing.js';
 
-/**
- * Convert our PaymentPayload into the facilitator's expected PaymentPayloadV1 format
- */
-function toFacilitatorPayload(payment: PaymentPayload): {
-  x402Version: number;
-  scheme: string;
-  network: string;
-  payload: Record<string, unknown>;
-} {
-  return {
-    x402Version: payment.x402Version ?? 2,
-    scheme: 'exact',
-    network: payment.accepted?.network ?? '',
-    payload: payment.payload as unknown as Record<string, unknown>,
-  };
-}
 
 /**
- * Build payment requirements for a tool (facilitator format)
+ * Build payment requirements for a tool (x402 V2 format)
  */
 export function buildFacilitatorRequirements(toolName: string): {
   accepts: Array<{
     scheme: string;
     network: string;
     asset: string;
-    maxAmountRequired: string;
     amount: string;
     maxTimeoutSeconds: number;
-    resource: string;
     payTo: string;
-    description: string;
     extra?: Record<string, unknown>;
   }>;
 } {
@@ -52,12 +33,9 @@ export function buildFacilitatorRequirements(toolName: string): {
     scheme: string;
     network: string;
     asset: string;
-    maxAmountRequired: string;
     amount: string;
     maxTimeoutSeconds: number;
-    resource: string;
     payTo: string;
-    description: string;
     extra?: Record<string, unknown>;
   }> = [];
 
@@ -80,12 +58,9 @@ export function buildFacilitatorRequirements(toolName: string): {
       scheme: 'exact',
       network: chain,
       asset,
-      maxAmountRequired: amountMicro,
       amount: amountMicro,
       maxTimeoutSeconds: 300,
-      resource: `mcp:tool:${toolName}`,
       payTo,
-      description: `Payment for ${toolName}`,
       extra: chain.startsWith('eip155:') ? { name: 'USD Coin', version: '2' } : undefined,
     });
   }
@@ -117,7 +92,7 @@ export async function verifyWithFacilitator(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         x402Version: payment.x402Version ?? 2,
-        paymentPayload: toFacilitatorPayload(payment),
+        paymentPayload: payment,
         paymentRequirements: matchingRequirement,
       }),
     });
@@ -170,7 +145,7 @@ export async function settleWithFacilitator(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         x402Version: payment.x402Version ?? 2,
-        paymentPayload: toFacilitatorPayload(payment),
+        paymentPayload: payment,
         paymentRequirements: matchingRequirement,
       }),
     });

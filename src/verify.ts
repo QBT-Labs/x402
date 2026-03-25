@@ -9,10 +9,13 @@ export interface PaymentPayload {
   x402Version: number;
   payload: EvmPaymentPayload | SolanaPaymentPayload;
   accepted: {
+    scheme: string;
     network: string;
     asset: string;
     amount: string;
-    payTo?: string;
+    payTo: string;
+    maxTimeoutSeconds?: number;
+    extra?: Record<string, unknown>;
   };
   resource?: {
     url: string;

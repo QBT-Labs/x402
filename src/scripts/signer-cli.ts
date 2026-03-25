@@ -11,58 +11,72 @@ import { DEFAULT_SOCKET_PATH } from '../signer/types.js';
 const args = process.argv.slice(2);
 
 async function prompt(question: string, hidden = false): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  if (hidden && process.stdin.isTTY) {
+    // Use muted output for password
+    const rl = createInterface({
+      input: process.stdin,
+      output: new (await import('stream')).Writable({
+        write: (_chunk, _encoding, callback) => callback()
+      }),
+      terminal: true,
+    });
 
-  return new Promise((resolve) => {
-    if (hidden && process.stdin.isTTY) {
-      process.stdout.write(question);
-      
-      const stdin = process.stdin;
-      stdin.setRawMode?.(true);
-      stdin.resume();
-      stdin.setEncoding('utf8');
-      
+    process.stdout.write(question);
+    
+    return new Promise((resolve) => {
       let password = '';
+      
+      process.stdin.setRawMode?.(true);
+      process.stdin.resume();
+      process.stdin.setEncoding('utf8');
+      
       const onData = (char: string) => {
-        const c = char.toString();
-        switch (c) {
+        switch (char) {
           case '\n':
           case '\r':
-          case '\u0004':
-            stdin.setRawMode?.(false);
-            stdin.removeListener('data', onData);
-            stdin.pause();
+          case '\u0004': // Ctrl+D
+            process.stdin.setRawMode?.(false);
+            process.stdin.removeListener('data', onData);
+            process.stdin.pause();
             process.stdout.write('\n');
             rl.close();
             resolve(password);
             break;
-          case '\u0003':
-            process.exit();
+          case '\u0003': // Ctrl+C
+            process.stdout.write('\n');
+            process.exit(0);
             break;
-          case '\u007F':
+          case '\u007F': // Backspace
+          case '\b':
             if (password.length > 0) {
               password = password.slice(0, -1);
-              process.stdout.write('\b \b'); // Erase last *
+              process.stdout.write('\b \b');
             }
             break;
           default:
-            password += c;
-            process.stdout.write('*'); // Show * instead of character
+            if (char.charCodeAt(0) >= 32) { // Printable chars only
+              password += char;
+              process.stdout.write('*');
+            }
             break;
         }
       };
       
-      stdin.on('data', onData);
-    } else {
+      process.stdin.on('data', onData);
+    });
+  } else {
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    
+    return new Promise((resolve) => {
       rl.question(question, (answer) => {
         rl.close();
         resolve(answer);
       });
-    }
-  });
+    });
+  }
 }
 
 function showHelp() {

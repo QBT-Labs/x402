@@ -145,6 +145,7 @@ export function buildPaymentPayload(signedPayment: SignedPayment): string {
 
 /**
  * Build payment payload from a pre-signed signature (for isolated signer mode)
+ * @deprecated Use buildPaymentPayloadWithAuthorization instead
  */
 export function buildPaymentPayloadFromSignature(params: {
   signature: string;
@@ -183,6 +184,46 @@ export function buildPaymentPayloadFromSignature(params: {
       asset,
       amount,
       payTo: to,
+    },
+  };
+  return Buffer.from(JSON.stringify(payload)).toString('base64');
+}
+
+/**
+ * Build payment payload with exact authorization data from signer.
+ * This ensures the authorization fields match what was signed.
+ */
+export function buildPaymentPayloadWithAuthorization(params: {
+  signature: string;
+  authorization: {
+    from: string;
+    to: string;
+    value: string;
+    validAfter: string;
+    validBefore: string;
+    nonce: string;
+  };
+  chainId: number;
+}): string {
+  const { signature, authorization, chainId } = params;
+  const network = `eip155:${chainId}`;
+  const asset = chainId === 84532
+    ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+    : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  
+  // Use exact authorization data that was signed
+  const payload = {
+    x402Version: 2,
+    payload: {
+      authorization,
+      signature,
+    },
+    accepted: {
+      scheme: 'exact',
+      network,
+      asset,
+      amount: authorization.value,
+      payTo: authorization.to,
     },
   };
   return Buffer.from(JSON.stringify(payload)).toString('base64');

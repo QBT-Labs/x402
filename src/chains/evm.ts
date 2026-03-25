@@ -124,7 +124,19 @@ export interface SignEIP3009Options {
 /**
  * Sign an EIP-3009 TransferWithAuthorization message
  */
-export async function signEIP3009(options: SignEIP3009Options): Promise<string> {
+export interface SignEIP3009Result {
+  signature: string;
+  authorization: {
+    from: string;
+    to: string;
+    value: string;
+    validAfter: string;
+    validBefore: string;
+    nonce: string;
+  };
+}
+
+export async function signEIP3009(options: SignEIP3009Options): Promise<SignEIP3009Result> {
   const { privateKeyToAccount } = await import('viem/accounts');
   const { randomBytes } = await import('crypto');
   
@@ -142,8 +154,10 @@ export async function signEIP3009(options: SignEIP3009Options): Promise<string> 
   }
   
   // Build the domain
+  // Base Sepolia USDC uses domain name "USDC"; mainnet uses "USD Coin"
+  const domainName = options.chainId === 84532 ? 'USDC' : 'USD Coin';
   const domain = {
-    name: 'USD Coin',
+    name: domainName,
     version: '2',
     chainId: options.chainId,
     verifyingContract: usdcAddress as `0x${string}`,
@@ -167,5 +181,15 @@ export async function signEIP3009(options: SignEIP3009Options): Promise<string> 
     message,
   });
   
-  return signature;
+  return {
+    signature,
+    authorization: {
+      from: account.address,
+      to: options.to,
+      value: options.value.toString(),
+      validAfter: options.validAfter.toString(),
+      validBefore: options.validBefore.toString(),
+      nonce,
+    },
+  };
 }

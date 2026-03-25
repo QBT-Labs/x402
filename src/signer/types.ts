@@ -25,6 +25,15 @@ export interface SignResponse {
   signature?: string;   // Signed data
   address?: string;     // Wallet address (for address action)
   error?: string;       // Error message if failed
+  // Return the exact authorization data that was signed (for EIP-3009)
+  authorization?: {
+    from: string;
+    to: string;
+    value: string;
+    validAfter: string;
+    validBefore: string;
+    nonce: string;
+  };
 }
 
 export interface SignerConfig {

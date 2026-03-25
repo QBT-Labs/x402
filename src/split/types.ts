@@ -21,11 +21,23 @@ export interface JWTClaims {
  * Signer interface for isolated key management.
  * Allows signing without exposing the private key.
  */
+export interface SignedPaymentData {
+  signature: string;
+  authorization: {
+    from: string;
+    to: string;
+    value: string;
+    validAfter: string;
+    validBefore: string;
+    nonce: string;
+  };
+}
+
 export interface PaymentSigner {
   /** Wallet address */
   address: string;
   /** Sign a payment (key stays isolated) */
-  sign(payload: { to: string; amount: string; chainId: number }): Promise<string>;
+  sign(payload: { to: string; amount: string; chainId: number }): Promise<SignedPaymentData>;
 }
 
 /**

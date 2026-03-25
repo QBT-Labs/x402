@@ -184,7 +184,7 @@ export class SignerServer {
 
     try {
       // Sign the payment
-      const signature = await signEIP3009({
+      const result = await signEIP3009({
         privateKey: `0x${privateKey.toString('hex')}`,
         to: payload.to,
         value: BigInt(payload.amount),
@@ -207,7 +207,8 @@ export class SignerServer {
       return {
         id,
         success: true,
-        signature,
+        signature: result.signature,
+        authorization: result.authorization,
       };
     } finally {
       // CRITICAL: Always wipe key from memory

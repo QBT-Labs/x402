@@ -9,7 +9,7 @@
  * Wallet private key never leaves the local machine.
  */
 
-import { signPayment, buildPaymentPayload, buildPaymentPayloadFromSignature } from '../client.js';
+import { signPayment, buildPaymentPayload, buildPaymentPayloadFromSignature, buildPaymentPayloadWithAuthorization } from '../client.js';
 import { verifyJWT, clearPublicKeyCache } from './jwt.js';
 import type { JWTClaims, SplitClientOptions, PaymentRequirements } from './types.js';
 
@@ -91,18 +91,16 @@ export function createSplitClient(options: SplitClientOptions): SplitClient {
 
       if (signer) {
         // Use isolated signer (key never leaves signer process)
-        const signature = await signer.sign({
+        const signResult = await signer.sign({
           to: payTo,
           amount: amountWei,
           chainId: reqChainId,
         });
         
-        // Build payment payload with signature from signer
-        paymentHeader = buildPaymentPayloadFromSignature({
-          signature,
-          from: signer.address,
-          to: payTo,
-          amount: amountWei,
+        // Build payment payload with exact authorization data from signer
+        paymentHeader = buildPaymentPayloadWithAuthorization({
+          signature: signResult.signature,
+          authorization: signResult.authorization,
           chainId: reqChainId,
         });
       } else {

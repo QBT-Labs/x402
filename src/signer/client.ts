@@ -104,19 +104,33 @@ export class SignerClient {
 
   /**
    * Sign a payment via the isolated signer
+   * Returns both signature and the exact authorization data that was signed
    */
-  async sign(payload: SignPayload): Promise<string> {
+  async sign(payload: SignPayload): Promise<{
+    signature: string;
+    authorization: {
+      from: string;
+      to: string;
+      value: string;
+      validAfter: string;
+      validBefore: string;
+      nonce: string;
+    };
+  }> {
     const response = await this.send({
       id: randomUUID(),
       action: 'sign',
       payload,
     });
 
-    if (!response.success || !response.signature) {
+    if (!response.success || !response.signature || !response.authorization) {
       throw new Error(response.error || 'Signing failed');
     }
 
-    return response.signature;
+    return {
+      signature: response.signature,
+      authorization: response.authorization,
+    };
   }
 
   /**
@@ -247,7 +261,17 @@ export async function createSignerClient(config?: SignerConfig): Promise<SignerC
 export async function signWithIsolatedSigner(
   payload: SignPayload,
   config?: SignerConfig
-): Promise<string> {
+): Promise<{
+  signature: string;
+  authorization: {
+    from: string;
+    to: string;
+    value: string;
+    validAfter: string;
+    validBefore: string;
+    nonce: string;
+  };
+}> {
   const client = await createSignerClient(config);
   
   if (!client) {

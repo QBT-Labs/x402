@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { parsePaymentHeader, verifyPayment, type PaymentPayload } from '../verify.js';
 import { verifyPayment as verifyEvmPayment } from '../chains/evm.js';
-import { verifyPayment as verifySolanaPayment, type SolanaPaymentPayload } from '../chains/solana.js';
+import {
+  verifyPayment as verifySolanaPayment,
+  type SolanaPaymentPayload,
+} from '../chains/solana.js';
 import { resetConfig } from '../config.js';
 import {
   PublicKey,
   Keypair,
   VersionedTransaction,
   TransactionMessage,
+  ComputeBudgetProgram,
+  TransactionInstruction,
 } from '@solana/web3.js';
 import { createTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 
@@ -19,13 +24,15 @@ const clientKeypair = Keypair.fromSeed(Buffer.alloc(32).fill(0x02));
 const facilitatorKeypair = Keypair.fromSeed(Buffer.alloc(32).fill(0x03));
 
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
 // Any valid base58 32-byte value works as blockhash for unit tests (not submitted)
 const FAKE_BLOCKHASH = new PublicKey(Buffer.alloc(32).fill(0x01)).toBase58();
 
 /**
  * Build a partially-signed test PST without hitting the network.
- * Uses a fake blockhash — safe for structural verification tests.
+ * Includes the full x402-required instruction layout:
+ *   [0] ComputeUnitLimit, [1] ComputeUnitPrice, [2] TransferChecked, [3] Memo
  */
 function buildTestPST(
   amount: bigint,
@@ -34,19 +41,28 @@ function buildTestPST(
   const sourceATA = getAssociatedTokenAddressSync(USDC_MINT, clientKeypair.publicKey);
   const destATA = getAssociatedTokenAddressSync(USDC_MINT, destOwner);
 
-  const ix = createTransferCheckedInstruction(
-    sourceATA,
-    USDC_MINT,
-    destATA,
-    clientKeypair.publicKey,
-    amount,
-    6,
-  );
+  const instructions = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 20_000 }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1 }),
+    createTransferCheckedInstruction(
+      sourceATA,
+      USDC_MINT,
+      destATA,
+      clientKeypair.publicKey,
+      amount,
+      6,
+    ),
+    new TransactionInstruction({
+      programId: MEMO_PROGRAM_ID,
+      keys: [],
+      data: Buffer.from('deadbeefcafebabe0011223344556677', 'utf-8'),
+    }),
+  ];
 
   const message = new TransactionMessage({
     payerKey: facilitatorKeypair.publicKey,
     recentBlockhash: FAKE_BLOCKHASH,
-    instructions: [ix],
+    instructions,
   }).compileToV0Message();
 
   const tx = new VersionedTransaction(message);
@@ -54,11 +70,6 @@ function buildTestPST(
 
   return {
     transaction: Buffer.from(tx.serialize()).toString('base64'),
-    network: 'solana',
-    from: clientKeypair.publicKey.toBase58(),
-    to: destOwner.toBase58(),
-    amount: amount.toString(),
-    mint: USDC_MINT.toBase58(),
   };
 }
 
@@ -202,14 +213,14 @@ describe('x402 Verification', () => {
   // -------------------------------------------------------------------------
   describe('verifySolanaPayment', () => {
     it('accepts valid PST with sufficient amount', async () => {
-      const result = await verifySolanaPayment(validSolanaInner, 0.01);
+      const result = await verifySolanaPayment(validSolanaInner, 0.01, 'solana:mainnet');
       expect(result.valid).toBe(true);
     });
 
     it('rejects transaction with insufficient amount', async () => {
       // Build PST with 5000 units ($0.005) and require $0.01
       const smallPayload = buildTestPST(5000n);
-      const result = await verifySolanaPayment(smallPayload, 0.01);
+      const result = await verifySolanaPayment(smallPayload, 0.01, 'solana:mainnet');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('Insufficient');
     });
@@ -218,22 +229,21 @@ describe('x402 Verification', () => {
       // Build PST paying a different merchant
       const wrongMerchant = Keypair.fromSeed(Buffer.alloc(32).fill(0x04)).publicKey;
       const wrongPayload = buildTestPST(10000n, wrongMerchant);
-      const result = await verifySolanaPayment(wrongPayload, 0.01);
+      const result = await verifySolanaPayment(wrongPayload, 0.01, 'solana:mainnet');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('destination ATA');
     });
 
     it('rejects malformed base64 transaction', async () => {
-      const badPayload = { ...validSolanaInner, transaction: 'not!!valid!!base64' };
-      const result = await verifySolanaPayment(badPayload, 0.01);
+      const badPayload: SolanaPaymentPayload = { transaction: 'not!!valid!!base64' };
+      const result = await verifySolanaPayment(badPayload, 0.01, 'solana:mainnet');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('deserialization');
     });
 
     it('rejects transaction with wrong USDC mint', async () => {
-      // Claim devnet network — mint check will fail because tx uses mainnet USDC
-      const mismatchedNetwork = { ...validSolanaInner, network: 'solana-devnet' as const };
-      const result = await verifySolanaPayment(mismatchedNetwork, 0.01);
+      // Pass devnet network — mint check will fail because tx uses mainnet USDC
+      const result = await verifySolanaPayment(validSolanaInner, 0.01, 'solana:devnet');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('Wrong mint');
     });

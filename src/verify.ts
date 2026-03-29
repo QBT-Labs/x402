@@ -63,11 +63,12 @@ export async function verifyPayment(
     const result = await verifySolanaPayment(
       payment.payload as SolanaPaymentPayload,
       expectedAmount,
+      network,
     );
     return {
       valid: result.valid,
       error: result.error,
-      details: result.txSignature ? { txSignature: result.txSignature } : undefined,
+      details: result.payer ? { payer: result.payer } : undefined,
     };
   }
 

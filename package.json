@@ -18,6 +18,10 @@
       "types": "./dist/chains/solana.d.ts",
       "import": "./dist/chains/solana.js"
     },
+    "./chains/cardano": {
+      "types": "./dist/chains/cardano.d.ts",
+      "import": "./dist/chains/cardano.js"
+    },
     "./middleware/mcp": {
       "types": "./dist/middleware/mcp.d.ts",
       "import": "./dist/middleware/mcp.js"

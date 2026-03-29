@@ -4,10 +4,12 @@
 
 import { verifyPayment as verifyEvmPayment, type EvmPaymentPayload } from './chains/evm.js';
 import { verifyPayment as verifySolanaPayment, type SolanaPaymentPayload } from './chains/solana.js';
+import { verifyCardanoPayment, type CardanoPaymentPayload } from './chains/cardano.js';
+import { getConfig } from './config.js';
 
 export interface PaymentPayload {
   x402Version: number;
-  payload: EvmPaymentPayload | SolanaPaymentPayload;
+  payload: EvmPaymentPayload | SolanaPaymentPayload | CardanoPaymentPayload;
   accepted: {
     scheme: string;
     network: string;
@@ -62,7 +64,13 @@ export async function verifyPayment(
   }
 
   if (network.startsWith('cardano:')) {
-    return { valid: false, error: 'Cardano verification not yet implemented' };
+    const cfg = getConfig();
+    const result = await verifyCardanoPayment(
+      payment.payload as CardanoPaymentPayload,
+      BigInt(Math.ceil(expectedAmount * 1_000_000)),
+      cfg.cardano?.rpcUrl, // treated as blockfrost project ID when present
+    );
+    return result;
   }
 
   return { valid: false, error: `Unsupported network: ${network}` };

@@ -60,10 +60,12 @@ const mockComplete1   = jest.fn<() => Promise<{ sign: { withWallet: () => unknow
 const mockPayToAddress = jest.fn().mockReturnValue({ complete: mockComplete1 });
 const mockNewTx        = jest.fn().mockReturnValue({ pay: { ToAddress: mockPayToAddress } });
 const mockFromSeed     = jest.fn();
+const mockAwaitTx      = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 const mockLucidInstance = {
   newTx: mockNewTx,
   selectWallet: { fromSeed: mockFromSeed },
+  awaitTx: mockAwaitTx,
 };
 const mockLucid      = jest.fn<() => Promise<typeof mockLucidInstance>>()
   .mockResolvedValue(mockLucidInstance);
@@ -90,6 +92,7 @@ jest.unstable_mockModule('@lucid-evolution/lucid', () => ({
 const {
   signCardanoPayment,
   verifyCardanoPayment,
+  submitCardanoTx,
   detectNetwork,
   IUSD_POLICY_ID,
   USDM_POLICY_ID,
@@ -119,6 +122,7 @@ beforeEach(() => {
   mockFromCborHex.mockImplementation(() => buildMockCmlTx());
   mockScriptHashFromHex.mockReturnValue({});
   mockAssetNameFromHex.mockReturnValue({});
+  mockAwaitTx.mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -328,77 +332,77 @@ describe('verifyCardanoPayment', () => {
     const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 10_000_000n, 'DJED');
     expect(result.valid).toBe(true);
   });
+});
 
-  // -------------------------------------------------------------------------
-  // Blockfrost submission
-  // -------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// submitCardanoTx
+// ---------------------------------------------------------------------------
 
-  describe('Blockfrost submission', () => {
-    const realFetch = global.fetch;
+describe('submitCardanoTx', () => {
+  const MAINNET_URL = 'https://cardano-mainnet.blockfrost.io/api/v0';
+  const PREPROD_URL = 'https://cardano-preprod.blockfrost.io/api/v0';
+  const realFetch = global.fetch;
 
-    beforeEach(() => {
-      mockCmlOutputs = [{ address: RECIPIENT, lovelace: 5_000_000n }];
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  it('returns txHash on a successful submission', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(`"${MOCK_TX_HASH}"`, { status: 200 }),
+    );
+    const result = await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123');
+    expect(result.txHash).toBe(MOCK_TX_HASH);
+  });
+
+  it('posts to /tx/submit with correct headers for Mainnet', async () => {
+    let capturedUrl = '';
+    let capturedInit: RequestInit = {};
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      capturedUrl  = input as string;
+      capturedInit = init ?? {};
+      return new Response(`"${MOCK_TX_HASH}"`, { status: 200 });
     });
+    await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123');
+    expect(capturedUrl).toContain('cardano-mainnet.blockfrost.io');
+    expect(capturedUrl).toContain('/tx/submit');
+    expect((capturedInit.headers as Record<string, string>)['project_id']).toBe('proj123');
+    expect((capturedInit.headers as Record<string, string>)['Content-Type']).toBe('application/cbor');
+    expect(capturedInit.method).toBe('POST');
+  });
 
-    afterEach(() => {
-      global.fetch = realFetch;
+  it('posts to the Preprod endpoint when given a preprod URL', async () => {
+    let capturedUrl = '';
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+      capturedUrl = input as string;
+      return new Response(`"${MOCK_TX_HASH}"`, { status: 200 });
     });
+    await submitCardanoTx(MOCK_CBOR, PREPROD_URL, 'proj123');
+    expect(capturedUrl).toContain('cardano-preprod.blockfrost.io');
+  });
 
-    it('submits tx and returns txHash on success', async () => {
-      global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
-        new Response(`"${MOCK_TX_HASH}"`, { status: 200 }),
-      );
-      const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n, 'ADA', 'proj123');
-      expect(result.valid).toBe(true);
-      expect(result.txHash).toBe(MOCK_TX_HASH);
-    });
+  it('throws on a non-ok Blockfrost response', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response('{"error":"invalid tx"}', { status: 400 }),
+    );
+    await expect(submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123')).rejects.toThrow(
+      /Blockfrost submission failed/,
+    );
+  });
 
-    it('posts to the correct Mainnet Blockfrost endpoint with project_id header', async () => {
-      let capturedUrl = '';
-      let capturedInit: RequestInit = {};
-      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
-        capturedUrl  = input as string;
-        capturedInit = init ?? {};
-        return new Response(`"${MOCK_TX_HASH}"`, { status: 200 });
-      });
-      await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n, 'ADA', 'proj123', 'Mainnet');
-      expect(capturedUrl).toContain('cardano-mainnet.blockfrost.io');
-      expect(capturedUrl).toContain('/tx/submit');
-      expect((capturedInit.headers as Record<string, string>)['project_id']).toBe('proj123');
-      expect(capturedInit.method).toBe('POST');
-    });
+  it('calls lucid.awaitTx when awaitConfirmation is true', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(`"${MOCK_TX_HASH}"`, { status: 200 }),
+    );
+    await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123', { awaitConfirmation: true });
+    expect(mockAwaitTx).toHaveBeenCalledWith(MOCK_TX_HASH);
+  });
 
-    it('posts to the correct Preprod Blockfrost endpoint', async () => {
-      let capturedUrl = '';
-      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
-        capturedUrl = input as string;
-        return new Response(`"${MOCK_TX_HASH}"`, { status: 200 });
-      });
-      await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n, 'ADA', 'proj123', 'Preprod');
-      expect(capturedUrl).toContain('cardano-preprod.blockfrost.io');
-    });
-
-    it('returns SUBMIT_FAILED on non-ok Blockfrost response', async () => {
-      global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
-        new Response('{"error":"invalid tx"}', { status: 400 }),
-      );
-      const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n, 'ADA', 'proj123');
-      expect(result.valid).toBe(false);
-      expect(result.error).toMatch(/SUBMIT_FAILED/);
-    });
-
-    it('returns SUBMIT_ERROR when fetch throws', async () => {
-      global.fetch = jest.fn<typeof fetch>().mockRejectedValue(new Error('network down'));
-      const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n, 'ADA', 'proj123');
-      expect(result.valid).toBe(false);
-      expect(result.error).toMatch(/SUBMIT_ERROR/);
-    });
-
-    it('does not call fetch when blockfrostProjectId is absent', async () => {
-      const mockFetch = jest.fn<typeof fetch>();
-      global.fetch = mockFetch;
-      await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
+  it('does not call lucid.awaitTx when awaitConfirmation is absent', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(`"${MOCK_TX_HASH}"`, { status: 200 }),
+    );
+    await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123');
+    expect(mockAwaitTx).not.toHaveBeenCalled();
   });
 });

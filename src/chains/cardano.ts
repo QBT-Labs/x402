@@ -205,33 +205,29 @@ export async function signCardanoPayment(
 // ---------------------------------------------------------------------------
 
 /**
- * Verify a Cardano x402 payment payload.
+ * Verify a Cardano x402 payment payload — structural checks only.
  *
- * Steps:
- *   1. Deserialise the CBOR hex via CML and confirm it parses as a valid transaction
- *   2. Scan outputs for one that pays ≥ expectedAmount of `token` to `expectedAddress`
- *      - For token payments also checks lovelace ≥ MIN_ADA_LOVELACE
- *   3. If blockfrostProjectId is provided, submit the transaction via Blockfrost
- *      REST API and return the txHash
+ * Matches the EVM/Solana pattern: no chain calls, no submission.
+ * The facilitator calls `submitCardanoTx` separately after authorization.
+ *
+ * Checks:
+ *   1. CBOR hex parses as a valid transaction
+ *   2. At least one output pays ≥ expectedAmount of `token` to `expectedAddress`
+ *      - For token payments: also enforces lovelace ≥ MIN_ADA_LOVELACE
  *
  * IMPORTANT: For token payments `expectedAmount` is in token units (not lovelace).
- * The min-ADA lovelace requirement is always enforced implicitly.
  *
- * @param payload             Payload from the client (contains the signed tx CBOR)
- * @param expectedAddress     Recipient bech32 address that must appear in the outputs
- * @param expectedAmount      Required amount (lovelace for ADA, token units otherwise)
- * @param token               Token being paid; defaults to 'ADA'
- * @param blockfrostProjectId When provided, the tx is submitted via Blockfrost
- * @param network             'Mainnet' | 'Preprod'; defaults to 'Mainnet'
+ * @param payload         Payload from the client (contains the signed tx CBOR)
+ * @param expectedAddress Recipient bech32 address that must appear in the outputs
+ * @param expectedAmount  Required amount (lovelace for ADA, token units otherwise)
+ * @param token           Token being paid; defaults to 'ADA'
  */
 export async function verifyCardanoPayment(
   payload: CardanoPaymentPayload,
   expectedAddress: string,
   expectedAmount: bigint,
   token: CardanoToken = 'ADA',
-  blockfrostProjectId?: string,
-  network: 'Mainnet' | 'Preprod' = 'Mainnet',
-): Promise<{ valid: boolean; txHash?: string; error?: string }> {
+): Promise<{ valid: boolean; error?: string }> {
   // Dynamic import — allows tests to mock before this function is called
   const { CML } = await import('@lucid-evolution/lucid');
 
@@ -245,72 +241,80 @@ export async function verifyCardanoPayment(
 
   // 2. Inspect outputs
   const outputs = cmlTx.body().outputs();
-  let outputFound = false;
 
   for (let i = 0; i < outputs.len(); i++) {
     const output = outputs.get(i);
-    const addr = output.address().to_bech32(undefined);
-
-    if (addr !== expectedAddress) continue;
+    if (output.address().to_bech32(undefined) !== expectedAddress) continue;
 
     const value = output.amount();
 
     if (token === 'ADA') {
-      if (value.coin() >= expectedAmount) {
-        outputFound = true;
-        break;
-      }
+      if (value.coin() >= expectedAmount) return { valid: true };
     } else {
       // Token payment: verify both lovelace min-ADA and native-asset amount
       if (value.coin() < MIN_ADA_LOVELACE) continue;
 
-      const unit      = tokenUnit(token);
-      const policyId  = unit.slice(0, 56);
-      const assetName = unit.slice(56);
-
-      const multiAsset = value.multi_asset();
+      const unit         = tokenUnit(token);
+      const multiAsset   = value.multi_asset();
       if (!multiAsset) continue;
 
-      const policyHash   = CML.ScriptHash.from_hex(policyId);
-      const assetNameObj = CML.AssetName.from_hex(assetName);
+      const policyHash   = CML.ScriptHash.from_hex(unit.slice(0, 56));
+      const assetNameObj = CML.AssetName.from_hex(unit.slice(56));
       const tokenAmount  = multiAsset.get(policyHash, assetNameObj) ?? 0n;
 
-      if (tokenAmount >= expectedAmount) {
-        outputFound = true;
-        break;
-      }
+      if (tokenAmount >= expectedAmount) return { valid: true };
     }
   }
 
-  if (!outputFound) {
-    return { valid: false, error: 'OUTPUT_MISMATCH' };
+  return { valid: false, error: 'OUTPUT_MISMATCH' };
+}
+
+// ---------------------------------------------------------------------------
+// submitCardanoTx — FACILITATOR / SETTLEMENT
+// ---------------------------------------------------------------------------
+
+/**
+ * Submit a signed Cardano transaction to the network via Blockfrost.
+ *
+ * This is the settlement step, called by the facilitator after `verifyCardanoPayment`
+ * has already confirmed the transaction structure is correct.
+ *
+ * @param cborHex             Signed transaction in hex CBOR form
+ * @param blockfrostUrl       Blockfrost base URL (e.g. https://cardano-mainnet.blockfrost.io/api/v0)
+ * @param blockfrostProjectId Blockfrost project_id header value
+ * @param options.awaitConfirmation  When true, polls Blockfrost until the tx appears on-chain
+ *
+ * @throws Error with a descriptive message if submission fails
+ */
+export async function submitCardanoTx(
+  cborHex: string,
+  blockfrostUrl: string,
+  blockfrostProjectId: string,
+  options?: { awaitConfirmation?: boolean },
+): Promise<{ txHash: string }> {
+  const res = await fetch(`${blockfrostUrl}/tx/submit`, {
+    method: 'POST',
+    headers: {
+      'project_id': blockfrostProjectId,
+      'Content-Type': 'application/cbor',
+    },
+    body: Buffer.from(cborHex, 'hex'),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Blockfrost submission failed (${res.status}): ${body}`);
   }
 
-  // 3. Submit via Blockfrost (optional)
-  if (blockfrostProjectId) {
-    try {
-      const url     = `${blockfrostUrlForNetwork(network)}/tx/submit`;
-      const txBytes = Buffer.from(payload.transaction, 'hex');
-      const res     = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'project_id': blockfrostProjectId,
-          'Content-Type': 'application/cbor',
-        },
-        body: txBytes,
-      });
+  const txHash = (await res.text()).replace(/"/g, '');
 
-      if (!res.ok) {
-        const body = await res.text();
-        return { valid: false, error: `SUBMIT_FAILED: ${body}` };
-      }
-
-      const txHash = (await res.text()).replace(/"/g, '');
-      return { valid: true, txHash };
-    } catch (err) {
-      return { valid: false, error: `SUBMIT_ERROR: ${String(err)}` };
-    }
+  if (options?.awaitConfirmation) {
+    // Use Lucid's provider to poll until the tx is confirmed on-chain
+    const { Lucid, Blockfrost } = await import('@lucid-evolution/lucid');
+    const network = blockfrostUrl.includes('preprod') ? 'Preprod' : 'Mainnet';
+    const lucid   = await Lucid(new Blockfrost(blockfrostUrl, blockfrostProjectId), network);
+    await lucid.awaitTx(txHash);
   }
 
-  return { valid: true };
+  return { txHash };
 }

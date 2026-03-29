@@ -42,11 +42,14 @@ describe('x402 Verification', () => {
   const validSolanaPayload: PaymentPayload = {
     x402Version: 1,
     payload: {
-      signature: 'base58signature',
-      from: 'SenderAddress',
+      signature: 'ab'.repeat(64), // 128-char hex Ed25519 signature (basic mode: format only)
+      from: 'SenderPubkeyBase58Address',
       to: 'SoLAddressHere123456789012345678901234567890',
       amount: '10000',
       mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      nonce: '00'.repeat(32),
+      validBefore: Math.floor(Date.now() / 1000) + 3600,
+      network: 'solana',
     },
     accepted: {
       scheme: 'exact',

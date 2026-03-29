@@ -4,6 +4,11 @@ import {
   signCardanoPayment,
   verifyCardanoPayment,
   detectNetwork,
+  IUSD_POLICY_ID,
+  USDM_POLICY_ID,
+  DJED_POLICY_ID,
+  USDCX_POLICY_ID,
+  KNOWN_CARDANO_TOKENS,
   type CardanoPaymentPayload,
 } from '../chains/cardano.js';
 
@@ -41,6 +46,60 @@ interface SignParams {
 }
 
 // ---------------------------------------------------------------------------
+// Token constants
+// ---------------------------------------------------------------------------
+
+describe('token constants', () => {
+  it('exports policy ID constants', () => {
+    // All Cardano policy IDs are Blake2b-224 script hashes: 28 bytes = 56 hex chars
+    expect(IUSD_POLICY_ID).toHaveLength(56);
+    expect(USDM_POLICY_ID).toHaveLength(56);
+    expect(DJED_POLICY_ID).toHaveLength(56);
+    expect(USDCX_POLICY_ID).toHaveLength(56);
+  });
+
+  it('KNOWN_CARDANO_TOKENS contains all 4 tokens', () => {
+    const symbols = Object.values(KNOWN_CARDANO_TOKENS).map((t) => t.symbol);
+    expect(symbols).toContain('iUSD');
+    expect(symbols).toContain('USDM');
+    expect(symbols).toContain('DJED');
+    expect(symbols).toContain('USDCx');
+  });
+
+  it('KNOWN_CARDANO_TOKENS keys are policy_id + asset_name_hex', () => {
+    for (const [key, token] of Object.entries(KNOWN_CARDANO_TOKENS)) {
+      expect(key).toBe(token.policyId + token.assetNameHex);
+    }
+  });
+
+  it('all known tokens have decimals: 6', () => {
+    for (const token of Object.values(KNOWN_CARDANO_TOKENS)) {
+      expect(token.decimals).toBe(6);
+    }
+  });
+
+  it('USDM uses CIP-68 asset name prefix 0014df10', () => {
+    const usdm = KNOWN_CARDANO_TOKENS[`${USDM_POLICY_ID}0014df105553444d`];
+    expect(usdm).toBeDefined();
+    expect(usdm.assetNameHex).toBe('0014df105553444d');
+  });
+
+  it('DJED asset name hex 446a65644d6963726f555344 decodes to DjedMicroUSD', () => {
+    const djed = KNOWN_CARDANO_TOKENS[`${DJED_POLICY_ID}446a65644d6963726f555344`];
+    expect(djed).toBeDefined();
+    const decoded = Buffer.from(djed.assetNameHex, 'hex').toString('utf8');
+    expect(decoded).toBe('DjedMicroUSD');
+  });
+
+  it('USDCx asset name decodes to USDCx', () => {
+    const usdcx = KNOWN_CARDANO_TOKENS[`${USDCX_POLICY_ID}5553444378`];
+    expect(usdcx).toBeDefined();
+    const decoded = Buffer.from(usdcx.assetNameHex, 'hex').toString('utf8');
+    expect(decoded).toBe('USDCx');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // signCardanoPayment
 // ---------------------------------------------------------------------------
 
@@ -69,7 +128,48 @@ describe('signCardanoPayment', () => {
     expect(payload.deadline).toBeLessThanOrEqual(after + 301);
   });
 
-  it('includes token field when provided', async () => {
+  it('includes iUSD token field when provided', async () => {
+    const privateKey = makePrivateKey();
+    const payload = await signCardanoPayment({
+      privateKey,
+      fromAddress: FROM,
+      toAddress: TO,
+      amountLovelace: 2_000_000n,
+      token: {
+        policyId: IUSD_POLICY_ID,
+        assetName: '69555344',
+        amount: 1_000_000n,
+      },
+      network: 'cardano',
+    });
+
+    expect(payload.token).toBeDefined();
+    expect(payload.token?.policy_id).toBe(IUSD_POLICY_ID);
+    expect(payload.token?.asset_name).toBe('69555344');
+    expect(payload.token?.amount).toBe('1000000');
+  });
+
+  it('includes USDM token field when provided', async () => {
+    const privateKey = makePrivateKey();
+    const payload = await signCardanoPayment({
+      privateKey,
+      fromAddress: FROM,
+      toAddress: TO,
+      amountLovelace: 2_000_000n,
+      token: {
+        policyId: USDM_POLICY_ID,
+        assetName: '0014df105553444d',
+        amount: 5_000_000n,
+      },
+      network: 'cardano',
+    });
+
+    expect(payload.token?.policy_id).toBe(USDM_POLICY_ID);
+    expect(payload.token?.asset_name).toBe('0014df105553444d');
+    expect(payload.token?.amount).toBe('5000000');
+  });
+
+  it('includes DJED token field when provided', async () => {
     const privateKey = makePrivateKey();
     const payload = await signCardanoPayment({
       privateKey,
@@ -77,17 +177,17 @@ describe('signCardanoPayment', () => {
       toAddress: 'addr_test1def',
       amountLovelace: 2_000_000n,
       token: {
-        policyId: 'f66d78b4a3cb3d37afa0ec36461e51ecbbd728f7a95aea88de7d7f12',
-        assetName: '69555344',
-        amount: 1_000_000n,
+        policyId: DJED_POLICY_ID,
+        assetName: '446a65644d6963726f555344',
+        amount: 10_000_000n,
       },
       network: 'cardano-preprod',
     });
 
-    expect(payload.token).toBeDefined();
-    expect(payload.token?.policy_id).toBe('f66d78b4a3cb3d37afa0ec36461e51ecbbd728f7a95aea88de7d7f12');
-    expect(payload.token?.asset_name).toBe('69555344');
-    expect(payload.token?.amount).toBe('1000000');
+    expect(payload.token?.policy_id).toBe(DJED_POLICY_ID);
+    expect(payload.token?.asset_name).toBe('446a65644d6963726f555344');
+    expect(payload.token?.amount).toBe('10000000');
+    expect(payload.network).toBe('cardano-preprod');
   });
 });
 
@@ -99,7 +199,7 @@ describe('verifyCardanoPayment', () => {
   const realDateNow = Date.now;
   afterEach(() => { Date.now = realDateNow; });
 
-  it('accepts a valid payload', async () => {
+  it('accepts a valid ADA payload', async () => {
     const privateKey = makePrivateKey();
     const payload = await makePayload(privateKey);
     const result = await verifyCardanoPayment(payload, 2_000_000n);
@@ -107,20 +207,74 @@ describe('verifyCardanoPayment', () => {
     expect(result.error).toBeUndefined();
   });
 
+  it('accepts a valid USDM token payload', async () => {
+    const privateKey = makePrivateKey();
+    const payload = await signCardanoPayment({
+      privateKey,
+      fromAddress: FROM,
+      toAddress: TO,
+      amountLovelace: 2_000_000n,
+      token: {
+        policyId: USDM_POLICY_ID,
+        assetName: '0014df105553444d',
+        amount: 5_000_000n,
+      },
+      network: 'cardano',
+    });
+    const result = await verifyCardanoPayment(payload, 2_000_000n);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts a valid DJED token payload', async () => {
+    const privateKey = makePrivateKey();
+    const payload = await signCardanoPayment({
+      privateKey,
+      fromAddress: FROM,
+      toAddress: TO,
+      amountLovelace: 2_000_000n,
+      token: {
+        policyId: DJED_POLICY_ID,
+        assetName: '446a65644d6963726f555344',
+        amount: 10_000_000n,
+      },
+      network: 'cardano',
+    });
+    const result = await verifyCardanoPayment(payload, 2_000_000n);
+    expect(result.valid).toBe(true);
+  });
+
   it('rejects an expired deadline', async () => {
     const privateKey = makePrivateKey();
     const payload = await makePayload(privateKey);
-    // Advance clock past the deadline so verification sees it as expired
     Date.now = () => (payload.deadline + 10) * 1000;
     const result = await verifyCardanoPayment(payload, 2_000_000n);
     expect(result.valid).toBe(false);
     expect(result.error).toContain('expired');
   });
 
-  it('rejects insufficient amount', async () => {
+  it('rejects insufficient lovelace amount', async () => {
     const privateKey = makePrivateKey();
     const payload = await makePayload(privateKey);
     const result = await verifyCardanoPayment(payload, 5_000_000n);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('Insufficient');
+  });
+
+  it('rejects USDM payload with insufficient lovelace for min-ADA', async () => {
+    const privateKey = makePrivateKey();
+    const payload = await signCardanoPayment({
+      privateKey,
+      fromAddress: FROM,
+      toAddress: TO,
+      amountLovelace: 1_000_000n, // below 2 ADA min
+      token: {
+        policyId: USDM_POLICY_ID,
+        assetName: '0014df105553444d',
+        amount: 5_000_000n,
+      },
+      network: 'cardano',
+    });
+    const result = await verifyCardanoPayment(payload, 2_000_000n);
     expect(result.valid).toBe(false);
     expect(result.error).toContain('Insufficient');
   });
@@ -140,11 +294,159 @@ describe('verifyCardanoPayment', () => {
   it('rejects payload where amount was tampered after signing', async () => {
     const privateKey = makePrivateKey();
     const payload = await makePayload(privateKey);
-    // Tamper amount — signature no longer covers this value
     const tampered: CardanoPaymentPayload = { ...payload, amount_lovelace: '1000' };
     const result = await verifyCardanoPayment(tampered, 1n);
     expect(result.valid).toBe(false);
     expect(result.error).toBeTruthy();
+  });
+
+  it('rejects USDM payload where token amount was tampered after signing', async () => {
+    const privateKey = makePrivateKey();
+    const payload = await signCardanoPayment({
+      privateKey,
+      fromAddress: FROM,
+      toAddress: TO,
+      amountLovelace: 2_000_000n,
+      token: {
+        policyId: USDM_POLICY_ID,
+        assetName: '0014df105553444d',
+        amount: 5_000_000n,
+      },
+      network: 'cardano',
+    });
+    const tampered: CardanoPaymentPayload = {
+      ...payload,
+      token: { ...payload.token!, amount: '999999999' },
+    };
+    const result = await verifyCardanoPayment(tampered, 2_000_000n);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+
+  describe('Blockfrost balance checks', () => {
+    it('passes when Blockfrost returns sufficient ADA balance', async () => {
+      const privateKey = makePrivateKey();
+      const payload = await makePayload(privateKey);
+
+      // Stub fetch to return adequate lovelace balance
+      const originalFetch = global.fetch;
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({ amount: [{ unit: 'lovelace', quantity: '10000000' }] }),
+          { status: 200 },
+        );
+      try {
+        const result = await verifyCardanoPayment(payload, 2_000_000n, 'test-project-id');
+        expect(result.valid).toBe(true);
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('rejects when Blockfrost shows insufficient ADA', async () => {
+      const privateKey = makePrivateKey();
+      const payload = await makePayload(privateKey);
+
+      const originalFetch = global.fetch;
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({ amount: [{ unit: 'lovelace', quantity: '1000000' }] }),
+          { status: 200 },
+        );
+      try {
+        const result = await verifyCardanoPayment(payload, 2_000_000n, 'test-project-id');
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('Insufficient on-chain ADA');
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('passes USDM token payment when Blockfrost shows sufficient token + ADA balance', async () => {
+      const privateKey = makePrivateKey();
+      const usdmUnit = `${USDM_POLICY_ID}0014df105553444d`;
+      const payload = await signCardanoPayment({
+        privateKey,
+        fromAddress: FROM,
+        toAddress: TO,
+        amountLovelace: 2_000_000n,
+        token: {
+          policyId: USDM_POLICY_ID,
+          assetName: '0014df105553444d',
+          amount: 5_000_000n,
+        },
+        network: 'cardano',
+      });
+
+      const originalFetch = global.fetch;
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            amount: [
+              { unit: 'lovelace', quantity: '5000000' },
+              { unit: usdmUnit, quantity: '10000000' },
+            ],
+          }),
+          { status: 200 },
+        );
+      try {
+        const result = await verifyCardanoPayment(payload, 2_000_000n, 'test-project-id');
+        expect(result.valid).toBe(true);
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('rejects DJED token payment when Blockfrost shows insufficient token balance', async () => {
+      const privateKey = makePrivateKey();
+      const djedUnit = `${DJED_POLICY_ID}446a65644d6963726f555344`;
+      const payload = await signCardanoPayment({
+        privateKey,
+        fromAddress: FROM,
+        toAddress: TO,
+        amountLovelace: 2_000_000n,
+        token: {
+          policyId: DJED_POLICY_ID,
+          assetName: '446a65644d6963726f555344',
+          amount: 10_000_000n,
+        },
+        network: 'cardano',
+      });
+
+      const originalFetch = global.fetch;
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            amount: [
+              { unit: 'lovelace', quantity: '5000000' },
+              { unit: djedUnit, quantity: '1000000' }, // only 1 DJED, need 10
+            ],
+          }),
+          { status: 200 },
+        );
+      try {
+        const result = await verifyCardanoPayment(payload, 2_000_000n, 'test-project-id');
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('Insufficient on-chain token balance');
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('returns error when Blockfrost request fails', async () => {
+      const privateKey = makePrivateKey();
+      const payload = await makePayload(privateKey);
+
+      const originalFetch = global.fetch;
+      global.fetch = async () => new Response('{}', { status: 403 });
+      try {
+        const result = await verifyCardanoPayment(payload, 2_000_000n, 'bad-project-id');
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('Could not fetch balance');
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
   });
 });
 

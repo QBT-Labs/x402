@@ -10,8 +10,11 @@
  * already hold enough ADA. Payments below ~2 000 000 lovelace may be unspendable.
  *
  * Supported assets:
- *   - ADA  (native, no policy_id)
- *   - iUSD (policy_id: f66d78b4a3cb3d37afa0ec36461e51ecbbd728f7a95aea88de7d7f12)
+ *   - ADA   (native, no policy_id)
+ *   - iUSD  (policy_id: f66d78b4a3cb3d37afa0ec36461e51ecbbd728f7a95aea88de7d7f12)
+ *   - USDM  (policy_id: c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad)
+ *   - DJED  (policy_id: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61)
+ *   - USDCx (policy_id: 1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e34)
  */
 
 import { ed25519 } from '@noble/curves/ed25519.js';
@@ -41,8 +44,68 @@ export interface CardanoPaymentPayload {
   network: 'cardano' | 'cardano-preprod';
 }
 
-/** iUSD policy ID on Cardano mainnet */
+// ---------------------------------------------------------------------------
+// Known token constants
+// ---------------------------------------------------------------------------
+
+/** iUSD — Indigo Protocol synthetic USD */
 export const IUSD_POLICY_ID = 'f66d78b4a3cb3d37afa0ec36461e51ecbbd728f7a95aea88de7d7f12';
+
+/** USDM — Mehen / Moneta fiat-backed stablecoin (CIP-68 format) */
+export const USDM_POLICY_ID = 'c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad';
+
+/** DJED — COTI/IOG ADA-overcollateralized stablecoin */
+export const DJED_POLICY_ID = '8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61';
+
+/**
+ * USDCx — Circle xReserve 1:1 USDC-backed token (launched 2026-02-18).
+ * Mainnet fingerprint:  asset1e7eewpjw8ua3f2gpfx7y34ww9vjl63hayn80kl
+ * Preprod fingerprint:  asset1ejelsh8crza8dyghxzsjhkjqutzr7q3dnregng
+ */
+export const USDCX_POLICY_ID = '1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e34';
+
+export interface KnownToken {
+  symbol: string;
+  policyId: string;
+  /** Hex-encoded asset name */
+  assetNameHex: string;
+  decimals: number;
+}
+
+/**
+ * Registry of known Cardano stablecoins supported by x402.
+ * Key is the Blockfrost unit string: policy_id + asset_name_hex.
+ */
+export const KNOWN_CARDANO_TOKENS: Record<string, KnownToken> = {
+  // iUSD – asset name hex: "iUSD" = 69555344
+  [`${IUSD_POLICY_ID}69555344`]: {
+    symbol: 'iUSD',
+    policyId: IUSD_POLICY_ID,
+    assetNameHex: '69555344',
+    decimals: 6,
+  },
+  // USDM – CIP-68 reference token prefix 0014df10 + "USDM" (5553444d)
+  [`${USDM_POLICY_ID}0014df105553444d`]: {
+    symbol: 'USDM',
+    policyId: USDM_POLICY_ID,
+    assetNameHex: '0014df105553444d',
+    decimals: 6,
+  },
+  // DJED – "DjedMicroUSD" = 446a65644d6963726f555344
+  [`${DJED_POLICY_ID}446a65644d6963726f555344`]: {
+    symbol: 'DJED',
+    policyId: DJED_POLICY_ID,
+    assetNameHex: '446a65644d6963726f555344',
+    decimals: 6,
+  },
+  // USDCx – "USDCx" = 5553444378
+  [`${USDCX_POLICY_ID}5553444378`]: {
+    symbol: 'USDCx',
+    policyId: USDCX_POLICY_ID,
+    assetNameHex: '5553444378',
+    decimals: 6,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -164,11 +227,15 @@ interface BlockfrostAddress {
   amount: Array<{ unit: string; quantity: string }>;
 }
 
-async function fetchBlockfrostBalance(
+/**
+ * Fetch all asset balances for an address from Blockfrost.
+ * Returns a map of unit → quantity (lovelace + all native assets), or null on failure.
+ */
+async function fetchBlockfrostAmounts(
   address: string,
   network: 'cardano' | 'cardano-preprod',
   projectId: string,
-): Promise<bigint | null> {
+): Promise<Map<string, bigint> | null> {
   const baseUrl =
     network === 'cardano-preprod'
       ? 'https://cardano-preprod.blockfrost.io/api/v0'
@@ -181,8 +248,11 @@ async function fetchBlockfrostBalance(
   if (!res.ok) return null;
 
   const data = (await res.json()) as BlockfrostAddress;
-  const lovelace = data.amount?.find((a) => a.unit === 'lovelace');
-  return lovelace ? BigInt(lovelace.quantity) : 0n;
+  const balances = new Map<string, bigint>();
+  for (const entry of data.amount ?? []) {
+    balances.set(entry.unit, BigInt(entry.quantity));
+  }
+  return balances;
 }
 
 /**
@@ -192,11 +262,18 @@ async function fetchBlockfrostBalance(
  *   1. Ed25519 signature over canonical JSON
  *   2. Deadline not expired
  *   3. amount_lovelace >= expectedLovelace
- *   4. (Optional) live ADA balance via Blockfrost
+ *   4. (Optional) live on-chain balance via Blockfrost REST API
+ *      - ADA payments: lovelace balance >= expectedLovelace
+ *      - Token payments: native-asset balance >= token.amount AND
+ *        lovelace balance >= expectedLovelace (covers UTxO min-ADA)
  *
- * @param payment         The payload received from the client
- * @param expectedLovelace Required lovelace amount
- * @param blockfrostProjectId When provided, live balance is checked via Blockfrost REST API
+ * IMPORTANT: Every Cardano UTxO requires ~1.5–2 ADA (1 500 000–2 000 000 lovelace).
+ * For token payments the expectedLovelace parameter should be set to at least
+ * 2 000 000 to ensure the payer holds enough ADA to cover the UTxO deposit.
+ *
+ * @param payment              Payload received from the client
+ * @param expectedLovelace     Required lovelace (min-ADA for token payments)
+ * @param blockfrostProjectId  When provided, live balance is verified via Blockfrost
  */
 export async function verifyCardanoPayment(
   payment: CardanoPaymentPayload,
@@ -205,11 +282,9 @@ export async function verifyCardanoPayment(
 ): Promise<{ valid: boolean; error?: string }> {
   // 1. Signature
   try {
-    const { signature, public_key, ...rest } = payment;
-    // canonicalJSON already excludes 'signature'; pass the full payment object
     const message = new TextEncoder().encode(canonicalJSON(payment));
-    const sigBytes = toBytes(signature);
-    const pubBytes = toBytes(public_key);
+    const sigBytes = toBytes(payment.signature);
+    const pubBytes = toBytes(payment.public_key);
     const ok = ed25519.verify(sigBytes, message, pubBytes);
     if (!ok) {
       return { valid: false, error: 'Invalid signature' };
@@ -224,7 +299,7 @@ export async function verifyCardanoPayment(
     return { valid: false, error: 'Payment deadline expired' };
   }
 
-  // 3. Amount
+  // 3. Amount (lovelace — covers ADA payments and UTxO min-ADA for token payments)
   const paidLovelace = BigInt(payment.amount_lovelace);
   if (paidLovelace < expectedLovelace) {
     return {
@@ -236,19 +311,35 @@ export async function verifyCardanoPayment(
   // 4. Blockfrost balance check (optional)
   if (blockfrostProjectId) {
     try {
-      const balance = await fetchBlockfrostBalance(
+      const balances = await fetchBlockfrostAmounts(
         payment.from_address,
         payment.network,
         blockfrostProjectId,
       );
-      if (balance === null) {
+      if (balances === null) {
         return { valid: false, error: 'Could not fetch balance from Blockfrost' };
       }
-      if (balance < expectedLovelace) {
+
+      // Always verify the address holds enough ADA for UTxO min-ADA
+      const lovelaceBalance = balances.get('lovelace') ?? 0n;
+      if (lovelaceBalance < expectedLovelace) {
         return {
           valid: false,
-          error: `Insufficient on-chain balance: ${balance} < ${expectedLovelace} lovelace`,
+          error: `Insufficient on-chain ADA: ${lovelaceBalance} < ${expectedLovelace} lovelace`,
         };
+      }
+
+      // For token payments, also verify the native-asset balance
+      if (payment.token) {
+        const unit = payment.token.policy_id + payment.token.asset_name;
+        const tokenBalance = balances.get(unit) ?? 0n;
+        const requiredTokenAmount = BigInt(payment.token.amount);
+        if (tokenBalance < requiredTokenAmount) {
+          return {
+            valid: false,
+            error: `Insufficient on-chain token balance: ${tokenBalance} < ${requiredTokenAmount} (unit: ${unit})`,
+          };
+        }
       }
     } catch {
       return { valid: false, error: 'Blockfrost balance check failed' };

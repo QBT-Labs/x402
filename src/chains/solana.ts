@@ -1,296 +1,304 @@
 /**
- * Solana Chain Support
+ * Solana Chain Support — Partially Signed Transaction (PST) pattern
  *
- * SPL Token transfer verification using Ed25519 signatures.
+ * SPL tokens have no native transferWithAuthorization equivalent (unlike EVM EIP-3009).
+ * x402 on Solana works via Partially Signed Transactions:
  *
- * IMPORTANT: Unlike EVM's EIP-3009 (gasless), Solana SPL transfers require the
- * sender to hold SOL for transaction fees. The sender must maintain a minimum SOL
- * balance (~0.002 SOL) to cover fees, in addition to their USDC balance.
- * This adapter verifies the off-chain authorization signature; actual on-chain
- * settlement still requires SOL in the sender's wallet.
+ *   Client:
+ *     1. Build a VersionedTransaction containing an SPL TransferChecked instruction
+ *     2. Set the FACILITATOR as fee payer — the user does not need SOL for gas
+ *     3. Partially sign with the client keypair only (fee payer signature is missing)
+ *     4. Serialize to base64, include as X-Payment header payload
+ *
+ *   Facilitator (server):
+ *     1. Deserialize and validate the transaction structure
+ *     2. Verify the transfer instruction matches payment requirements
+ *     3. Add fee payer (facilitator) signature
+ *     4. Submit to the Solana network and confirm
+ *
+ * The user's wallet must hold sufficient USDC. The facilitator covers SOL fees.
  */
 
+import {
+  PublicKey,
+  Keypair,
+  VersionedTransaction,
+  TransactionMessage,
+  Connection,
+} from '@solana/web3.js';
+import {
+  createTransferCheckedInstruction,
+  getAssociatedTokenAddressSync,
+  TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
 import { getConfig } from '../config.js';
 
-// Public Solana RPC endpoints (used when no rpcUrl is configured)
+const USDC_MAINNET = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const USDC_DEVNET = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const USDC_DECIMALS = 6;
+
 const RPC_MAINNET = 'https://api.mainnet-beta.solana.com';
 const RPC_DEVNET = 'https://api.devnet.solana.com';
 
+// SPL Token instruction discriminator for TransferChecked
+const TRANSFER_CHECKED_IX = 12;
+
+// TransferChecked data is exactly 10 bytes: [discriminator(1), amount(8 LE), decimals(1)]
+const TRANSFER_CHECKED_DATA_LEN = 10;
+
 export interface SolanaPaymentPayload {
-  from: string;        // base58 pubkey
-  to: string;          // base58 pubkey
-  amount: string;      // USDC smallest unit (6 decimals)
-  mint: string;        // USDC mint address
-  nonce: string;       // random bytes32 hex
-  validBefore: number; // unix timestamp
-  signature: string;   // Ed25519 hex signature (128 hex chars = 64 bytes)
+  transaction: string;  // base64-encoded partially-signed Solana VersionedTransaction
   network: 'solana' | 'solana-devnet';
+  from: string;         // client base58 pubkey (token authority)
+  to: string;           // merchant base58 pubkey (ATA owner)
+  amount: string;       // USDC amount in smallest unit (6 decimals)
+  mint: string;         // USDC mint address
 }
 
 /**
- * Build canonical payload bytes for signing/verification.
- * Format: "<from>|<to>|<amount>|<mint>|<nonce>|<validBefore>"
- */
-function canonicalBytes(payload: Omit<SolanaPaymentPayload, 'signature'>): Uint8Array {
-  const msg = [
-    payload.from,
-    payload.to,
-    payload.amount,
-    payload.mint,
-    payload.nonce,
-    payload.validBefore.toString(),
-  ].join('|');
-  return new TextEncoder().encode(msg);
-}
-
-/**
- * Sign a Solana USDC payment authorization with Ed25519.
+ * Build and partially sign a Solana VersionedTransaction for a USDC payment.
  *
- * NOTE: Unlike EVM's EIP-3009, on-chain execution of an SPL transfer requires
- * the sender to hold SOL for transaction fees (~0.002 SOL minimum).
+ * The facilitator is set as fee payer so the sender does not need SOL for gas.
+ * Only the client signature is applied — the fee payer signature must be added
+ * by the facilitator before the transaction can be submitted to the network.
  *
- * @param params.privateKey - 64-byte Ed25519 keypair (seed + public key, Solana convention)
- * @param params.to - recipient base58 pubkey
- * @param params.amount - amount in USD, converted to USDC smallest unit (6 decimals)
- * @param params.network - target network
+ * @param params.privateKey  64-byte Solana keypair (Solana convention: seed + public key)
+ * @param params.to          merchant base58 pubkey (USDC recipient)
+ * @param params.amount      payment amount in USD (converted to 6-decimal USDC units)
+ * @param params.network     target network
+ * @param params.feePayer    facilitator base58 pubkey — received from payment requirements
+ * @param params.rpcUrl      optional RPC endpoint override
  */
 export async function signSolanaPayment(params: {
-  privateKey: Uint8Array; // 64-byte keypair
+  privateKey: Uint8Array;
   to: string;
-  amount: number; // in USD
+  amount: number;
   network: 'solana' | 'solana-devnet';
+  feePayer: string;
+  rpcUrl?: string;
 }): Promise<SolanaPaymentPayload> {
-  const { ed25519 } = await import('@noble/curves/ed25519.js');
-  const { randomBytes } = await import('crypto');
-
-  const { privateKey, to, amount, network } = params;
+  const { privateKey, to, amount, network, feePayer, rpcUrl } = params;
 
   if (privateKey.length !== 64) {
-    throw new Error('privateKey must be 64 bytes (Ed25519 seed + public key, Solana convention)');
+    throw new Error('privateKey must be 64 bytes (Solana keypair: seed + public key)');
   }
 
-  // Solana keypair: first 32 bytes are the seed, last 32 are the public key
-  const seed = privateKey.slice(0, 32);
-  const publicKeyBytes = ed25519.getPublicKey(seed);
-  const from = bytesToBase58(publicKeyBytes);
+  const clientKeypair = Keypair.fromSecretKey(privateKey);
+  const mint = network === 'solana' ? USDC_MAINNET : USDC_DEVNET;
+  const amountUnits = BigInt(Math.ceil(amount * 1_000_000));
 
-  const mint = network === 'solana'
-    ? 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-    : '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const mintPubkey = new PublicKey(mint);
+  const toPubkey = new PublicKey(to);
+  const feePayerPubkey = new PublicKey(feePayer);
 
-  const amountStr = Math.ceil(amount * 1_000_000).toString();
-  const nonce = randomBytes(32).toString('hex');
-  const validBefore = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+  // Derive the Associated Token Accounts for client → merchant
+  const sourceATA = getAssociatedTokenAddressSync(mintPubkey, clientKeypair.publicKey);
+  const destATA = getAssociatedTokenAddressSync(mintPubkey, toPubkey);
 
-  const payload: Omit<SolanaPaymentPayload, 'signature'> = {
-    from,
-    to,
-    amount: amountStr,
-    mint,
-    nonce,
-    validBefore,
+  const rpcEndpoint = rpcUrl ?? (network === 'solana' ? RPC_MAINNET : RPC_DEVNET);
+  const connection = new Connection(rpcEndpoint, 'confirmed');
+  const { blockhash } = await connection.getLatestBlockhash();
+
+  const transferIx = createTransferCheckedInstruction(
+    sourceATA,
+    mintPubkey,
+    destATA,
+    clientKeypair.publicKey,
+    amountUnits,
+    USDC_DECIMALS,
+  );
+
+  const message = new TransactionMessage({
+    payerKey: feePayerPubkey,
+    recentBlockhash: blockhash,
+    instructions: [transferIx],
+  }).compileToV0Message();
+
+  const tx = new VersionedTransaction(message);
+  tx.sign([clientKeypair]); // partial sign — fee payer signature intentionally missing
+
+  return {
+    transaction: Buffer.from(tx.serialize()).toString('base64'),
     network,
+    from: clientKeypair.publicKey.toBase58(),
+    to,
+    amount: amountUnits.toString(),
+    mint,
   };
-
-  const msgBytes = canonicalBytes(payload);
-  const sigBytes = ed25519.sign(msgBytes, seed);
-
-  return { ...payload, signature: bytesToHex(sigBytes) };
 }
 
 /**
- * Verify a Solana SPL USDC payment authorization.
+ * Decoded fields from the TransferChecked instruction inside a PST.
+ */
+type DecodeResult =
+  | {
+      ok: true;
+      source: string;
+      mint: string;
+      destination: string;
+      authority: string;
+      amount: bigint;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Locate and decode the first SPL TransferChecked instruction in a v0 transaction.
+ */
+function decodeTransferChecked(tx: VersionedTransaction): DecodeResult {
+  // We require v0 (versioned) transactions. Both staticAccountKeys and
+  // compiledInstructions are present only on MessageV0.
+  const msg = tx.message as unknown as {
+    staticAccountKeys?: PublicKey[];
+    compiledInstructions?: Array<{
+      programIdIndex: number;
+      accountKeyIndexes: number[];
+      data: Uint8Array;
+    }>;
+  };
+
+  if (!msg.staticAccountKeys || !msg.compiledInstructions) {
+    return { ok: false, error: 'Only v0 transactions are supported' };
+  }
+
+  const accountKeys = msg.staticAccountKeys;
+  const instructions = msg.compiledInstructions;
+
+  for (const ix of instructions) {
+    const programId = accountKeys[ix.programIdIndex];
+    if (!programId?.equals(TOKEN_PROGRAM_ID)) continue;
+
+    const data = Buffer.from(ix.data);
+    if (data.length !== TRANSFER_CHECKED_DATA_LEN || data[0] !== TRANSFER_CHECKED_IX) continue;
+
+    if (ix.accountKeyIndexes.length < 4) {
+      return { ok: false, error: 'TransferChecked: insufficient account indexes' };
+    }
+
+    const amount = data.readBigUInt64LE(1);
+    const source = accountKeys[ix.accountKeyIndexes[0]]?.toBase58() ?? '';
+    const mint = accountKeys[ix.accountKeyIndexes[1]]?.toBase58() ?? '';
+    const destination = accountKeys[ix.accountKeyIndexes[2]]?.toBase58() ?? '';
+    const authority = accountKeys[ix.accountKeyIndexes[3]]?.toBase58() ?? '';
+
+    return { ok: true, source, mint, destination, authority, amount };
+  }
+
+  return { ok: false, error: 'No TransferChecked instruction found in transaction' };
+}
+
+/**
+ * Verify a Solana PST payment.
+ *
+ * Basic mode (no facilitator privateKey in config): validates transaction
+ * structure, instruction contents, amounts, and recipient — no network calls.
+ *
+ * Full mode (facilitator privateKey configured): all basic checks plus
+ * co-sign with facilitator keypair and submit to the Solana network.
  *
  * Verification steps:
- * 1. Check signature format (128 hex chars)
- * 2. Check validBefore > now
- * 3. Check amount >= expectedAmount (USDC has 6 decimals)
- * 4. Check recipient matches configured address
- * 5. Full mode only: verify Ed25519 signature cryptographically
- * 6. Full mode only: check sender SPL balance via RPC >= amount
- *
- * Nonce deduplication is handled by the facilitator, not here.
+ *  1. Deserialize the base64 transaction
+ *  2. Locate the TransferChecked instruction
+ *  3. Check mint = expected USDC for this network
+ *  4. Check destination ATA = expected ATA derived from configured payTo address
+ *  5. Check amount >= expectedAmount
+ *  6. Check authority matches the claimed sender (payment.from)
+ *  7. Full mode: add facilitator fee payer signature and submit to network
  */
 export async function verifyPayment(
   payment: SolanaPaymentPayload,
-  expectedAmount: number
-): Promise<{ valid: boolean; error?: string }> {
+  expectedAmount: number,
+): Promise<{ valid: boolean; error?: string; txSignature?: string }> {
   const cfg = getConfig();
-  const mode = cfg.verifyMode ?? 'basic';
 
-  // --- Signature format check ---
-  if (!payment.signature || !/^[0-9a-fA-F]{128}$/.test(payment.signature)) {
-    return { valid: false, error: 'Invalid signature format (expected 128-char hex)' };
+  // 1. Deserialize
+  let tx: VersionedTransaction;
+  try {
+    const txBytes = Buffer.from(payment.transaction, 'base64');
+    tx = VersionedTransaction.deserialize(txBytes);
+  } catch {
+    return { valid: false, error: 'Invalid transaction: deserialization failed' };
   }
 
-  // --- Nonce format check ---
-  if (!payment.nonce || !/^[0-9a-fA-F]+$/.test(payment.nonce)) {
-    return { valid: false, error: 'Invalid nonce format' };
+  // 2. Locate TransferChecked instruction
+  const decoded = decodeTransferChecked(tx);
+  if (!decoded.ok) {
+    return { valid: false, error: decoded.error };
+  }
+  const { mint: txMint, destination, authority, amount: txAmount } = decoded;
+
+  // 3. Mint must be the canonical USDC for this network
+  const expectedMint = payment.network === 'solana' ? USDC_MAINNET : USDC_DEVNET;
+  if (txMint !== expectedMint) {
+    return { valid: false, error: `Wrong mint: expected ${expectedMint}, got ${txMint}` };
   }
 
-  // --- Expiry check ---
-  const now = Math.floor(Date.now() / 1000);
-  if (!payment.validBefore || payment.validBefore <= now) {
-    return { valid: false, error: 'Authorization expired' };
+  // 4. Destination ATA must match the ATA derived from the configured recipient address
+  if (!cfg.solana?.address) {
+    return { valid: false, error: 'Solana address not configured' };
+  }
+  const expectedDestATA = getAssociatedTokenAddressSync(
+    new PublicKey(expectedMint),
+    new PublicKey(cfg.solana.address),
+  ).toBase58();
+  if (destination !== expectedDestATA) {
+    return {
+      valid: false,
+      error: `Wrong destination ATA: expected ${expectedDestATA}, got ${destination}`,
+    };
   }
 
-  // --- Amount check ---
-  const paidAmount = BigInt(payment.amount);
+  // 5. Amount must be sufficient
   const requiredAmount = BigInt(Math.ceil(expectedAmount * 1_000_000));
-
-  if (paidAmount < requiredAmount) {
-    return { valid: false, error: `Insufficient: ${paidAmount} < ${requiredAmount}` };
+  if (txAmount < requiredAmount) {
+    return { valid: false, error: `Insufficient: ${txAmount} < ${requiredAmount}` };
   }
 
-  // --- Recipient check ---
-  if (payment.to !== cfg.solana?.address) {
-    return { valid: false, error: 'Wrong recipient' };
+  // 6. Authority on the instruction must match the claimed sender
+  if (authority !== payment.from) {
+    return {
+      valid: false,
+      error: `Transaction authority does not match claimed sender`,
+    };
   }
 
-  if (mode === 'full') {
-    // --- Ed25519 cryptographic signature verification ---
-    try {
-      const { ed25519 } = await import('@noble/curves/ed25519.js');
-      const sigBytes = hexToBytes(payment.signature);
-      const pubKeyBytes = base58ToBytes(payment.from);
-      const msgBytes = canonicalBytes(payment);
-      const isValid = ed25519.verify(sigBytes, msgBytes, pubKeyBytes);
-      if (!isValid) {
-        return { valid: false, error: 'Invalid Ed25519 signature' };
-      }
-    } catch {
-      return { valid: false, error: 'Signature verification failed' };
-    }
-
-    // --- SPL token balance check via JSON-RPC ---
-    try {
-      const rpcUrl = cfg.solana?.rpcUrl ??
-        (payment.network === 'solana' ? RPC_MAINNET : RPC_DEVNET);
-      const balance = await getSplBalance(payment.from, payment.mint, rpcUrl);
-      if (balance < paidAmount) {
-        return { valid: false, error: `Insufficient SPL balance: ${balance} < ${paidAmount}` };
-      }
-    } catch {
-      // Non-fatal: if RPC is unavailable, proceed without balance check
-      console.warn('x402: Solana RPC unavailable, skipping SPL balance check');
-    }
+  // 7. Full mode: add fee payer signature and submit
+  if (cfg.solana.privateKey) {
+    return coSignAndSubmit(tx, payment, cfg.solana.privateKey, cfg.solana.rpcUrl);
   }
 
+  // Basic mode: structural validation only (no network submission)
   return { valid: true };
 }
 
 /**
- * Query SPL token balance for an owner address via Solana JSON-RPC.
- * Sums all token accounts for the given mint.
+ * Add the facilitator's fee payer signature and submit the transaction to Solana.
  */
-async function getSplBalance(
-  owner: string,
-  mint: string,
-  rpcUrl: string
-): Promise<bigint> {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getTokenAccountsByOwner',
-      params: [owner, { mint }, { encoding: 'jsonParsed' }],
-    }),
-  });
+async function coSignAndSubmit(
+  tx: VersionedTransaction,
+  payment: SolanaPaymentPayload,
+  facilitatorPrivateKey: Uint8Array,
+  rpcUrl?: string,
+): Promise<{ valid: boolean; error?: string; txSignature?: string }> {
+  try {
+    const facilitatorKeypair = Keypair.fromSecretKey(facilitatorPrivateKey);
+    tx.sign([facilitatorKeypair]);
 
-  type RpcResponse = {
-    result?: {
-      value?: Array<{
-        account?: {
-          data?: {
-            parsed?: {
-              info?: { tokenAmount?: { amount?: string } };
-            };
-          };
-        };
-      }>;
+    const endpoint = rpcUrl ?? (payment.network === 'solana' ? RPC_MAINNET : RPC_DEVNET);
+    const connection = new Connection(endpoint, 'confirmed');
+
+    const txSignature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    });
+
+    // confirmTransaction string-form is deprecated in web3.js v1 but functionally correct
+    await connection.confirmTransaction(txSignature, 'confirmed');
+
+    return { valid: true, txSignature };
+  } catch (err) {
+    return {
+      valid: false,
+      error: `Settlement failed: ${err instanceof Error ? err.message : String(err)}`,
     };
-  };
-
-  const data = (await response.json()) as RpcResponse;
-  const accounts = data?.result?.value ?? [];
-
-  let total = 0n;
-  for (const acc of accounts) {
-    const amount = acc?.account?.data?.parsed?.info?.tokenAmount?.amount;
-    if (amount) {
-      total += BigInt(amount);
-    }
   }
-  return total;
-}
-
-// ---------------------------------------------------------------------------
-// Base58 utilities (Solana-compatible, no checksum)
-// ---------------------------------------------------------------------------
-
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-
-function bytesToBase58(bytes: Uint8Array): string {
-  let leadingZeros = 0;
-  for (const b of bytes) {
-    if (b !== 0) break;
-    leadingZeros++;
-  }
-
-  let num = 0n;
-  for (const b of bytes) {
-    num = (num << 8n) | BigInt(b);
-  }
-
-  let result = '';
-  while (num > 0n) {
-    result = BASE58_ALPHABET[Number(num % 58n)] + result;
-    num = num / 58n;
-  }
-
-  return '1'.repeat(leadingZeros) + result;
-}
-
-function base58ToBytes(str: string): Uint8Array {
-  const ALPHABET_MAP: Record<string, number> = {};
-  for (let i = 0; i < BASE58_ALPHABET.length; i++) {
-    ALPHABET_MAP[BASE58_ALPHABET[i]] = i;
-  }
-
-  let leadingZeros = 0;
-  for (const char of str) {
-    if (char !== '1') break;
-    leadingZeros++;
-  }
-
-  let num = 0n;
-  for (const char of str) {
-    const val = ALPHABET_MAP[char];
-    if (val === undefined) throw new Error(`Invalid base58 character: ${char}`);
-    num = num * 58n + BigInt(val);
-  }
-
-  const bytes: number[] = [];
-  while (num > 0n) {
-    bytes.unshift(Number(num & 0xffn));
-    num >>= 8n;
-  }
-
-  return new Uint8Array([...Array(leadingZeros).fill(0), ...bytes]);
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const result = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    result[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-  }
-  return result;
 }

@@ -5,6 +5,8 @@
 export interface ChainConfig {
   address: string;
   rpcUrl?: string;
+  /** Solana facilitator fee payer keypair (64-byte Solana secret key). Required for full PST settlement. */
+  privateKey?: Uint8Array;
 }
 
 export interface X402Config {

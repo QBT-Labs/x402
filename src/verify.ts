@@ -60,7 +60,15 @@ export async function verifyPayment(
   }
 
   if (network.startsWith('solana:')) {
-    return verifySolanaPayment(payment.payload as SolanaPaymentPayload, expectedAmount);
+    const result = await verifySolanaPayment(
+      payment.payload as SolanaPaymentPayload,
+      expectedAmount,
+    );
+    return {
+      valid: result.valid,
+      error: result.error,
+      details: result.txSignature ? { txSignature: result.txSignature } : undefined,
+    };
   }
 
   if (network.startsWith('cardano:')) {

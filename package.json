@@ -101,10 +101,11 @@
     }
   },
   "dependencies": {
+    "@lucid-evolution/lucid": "^0.4.29",
+    "@modelcontextprotocol/sdk": "1.27.1",
     "@noble/curves": "^2.0.0",
     "@noble/hashes": "^2.0.0",
-    "viem": "^2.47.4",
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "viem": "^2.47.4"
   },
   "devDependencies": {
     "@types/jest": "^29.0.0",

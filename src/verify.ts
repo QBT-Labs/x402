@@ -65,12 +65,16 @@ export async function verifyPayment(
 
   if (network.startsWith('cardano:')) {
     const cfg = getConfig();
+    const lucidNetwork = (cfg.testnet || network === 'cardano:preprod') ? 'Preprod' : 'Mainnet';
     const result = await verifyCardanoPayment(
       payment.payload as CardanoPaymentPayload,
+      cfg.cardano?.address ?? '',
       BigInt(Math.ceil(expectedAmount * 1_000_000)),
-      cfg.cardano?.rpcUrl, // treated as blockfrost project ID when present
+      'ADA',
+      cfg.cardano?.rpcUrl, // Blockfrost project ID
+      lucidNetwork,
     );
-    return result;
+    return { valid: result.valid, error: result.error, details: result.txHash ? { txHash: result.txHash } : undefined };
   }
 
   return { valid: false, error: `Unsupported network: ${network}` };

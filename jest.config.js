@@ -18,6 +18,6 @@ export default {
     ],
   },
   testMatch: ['**/__tests__/**/*.test.ts'],
-  testPathIgnorePatterns: ['/node_modules/', '/.claude/'],
+  testPathIgnorePatterns: ['/node_modules/', '/\\.claude/'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/__tests__/**'],
 };

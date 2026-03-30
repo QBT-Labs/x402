@@ -126,23 +126,11 @@ export function withX402Server(options: X402ServerOptions): (request: Request) =
       );
     }
 
-    // Settle payment BEFORE executing tool (must succeed)
-    const settlement = await settleWithFacilitator(payment, toolName);
-    if (!settlement.success) {
-      return new Response(
-        JSON.stringify({
-          error: 'Payment settlement failed',
-          reason: settlement.error,
-        }),
-        {
-          status: 402,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-    }
-
-    // Payment settled — execute the request
+    // Execute the request — settlement is fire-and-forget so a network
+    // failure never blocks or crashes the response.
     const response = await handler(request);
+
+    settleWithFacilitator(payment, toolName).catch(() => {});
 
     return response;
   };

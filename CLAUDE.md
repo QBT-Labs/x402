@@ -145,6 +145,19 @@ From `src/config.ts`:
 
 EIP-712 domain name for USDC: `"USDC"` on Base Sepolia (`chainId 84532`), `"USD Coin"` on mainnet.
 
+### Cardano (policy IDs)
+
+Lucid UTxO unit = `policyId + assetNameHex` concatenated. Constants are in `src/types/cardano.types.ts`.
+
+| Token | Policy ID | Asset Name Hex |
+|-------|-----------|----------------|
+| iUSD  | `f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880` | `69555344` |
+| USDM  | `c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad` | `0014df105553444d` |
+| DJED  | `8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61` | `446a65644d6963726f555344` |
+| USDCx | `1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e34` | `5553444378` |
+
+ADA uses the special unit string `lovelace`.
+
 ---
 
 ## Dependencies
@@ -185,18 +198,6 @@ Peer/optional deps: `express` (for `x402Express`), `hono` (for `x402Hono`).
 - **Never** include "Claude" or "Co-Authored-By: Claude" in any commit message
 - **Never** commit `.env`, private keys, or secrets
 - Keep chain modules free of Node.js-only APIs
-
----
-
-## Key Linear issues
-
-| Issue | Topic |
-|-------|-------|
-| QBT-596 | Solana adapter (full cryptographic verification) |
-| QBT-595 | Cardano adapter ✅ |
-| QBT-597 | Docs update |
-| QBT-594 | Express + Hono adapters ✅ |
-| QBT-598 | MCP Proxy CLI |
 
 ---
 

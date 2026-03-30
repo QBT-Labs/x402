@@ -183,11 +183,14 @@ export async function settleWithFacilitator(
       settled?: boolean;
       txHash?: string;
       transactionHash?: string;
+      transaction?: string;
+      signature?: string;
       error?: string;
     };
+    console.log('[x402] PayAI settle response:', JSON.stringify(result));
 
     const success = result.success ?? result.settled ?? false;
-    const txHash = result.txHash ?? result.transactionHash;
+    const txHash = result.txHash ?? result.transactionHash ?? result.transaction ?? result.signature;
 
     if (!success) {
       return { success: false, error: result.error || 'Settlement failed' };

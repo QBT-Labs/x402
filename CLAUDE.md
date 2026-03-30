@@ -260,17 +260,12 @@ export X402_EVM_ADDRESS=0xYourWalletAddress
 export X402_VERIFY_MODE=basic
 export X402_TESTNET=true
 
-# 2. Run test server (Hono on :3001, Express on :3002)
-npx tsx examples/test-hono-server.ts
-npx tsx examples/test-express-server.ts
+# 2. Test with curl
+# No payment → 402 with payment requirements
+curl http://localhost:3001/paid
 
-# 3. Test endpoints
-curl http://localhost:3001/           # Free endpoint → 200
-curl http://localhost:3001/paid       # No payment → 402
-curl -H "x-payment: <base64>" http://localhost:3001/paid  # With payment → 200
-
-# 4. Generate mock payment header
-npx tsx examples/generate-mock-payment.ts 0xYourWalletAddress
+# With mock payment → 200 (basic mode only)
+curl -H "x-payment: <base64_payment_header>" http://localhost:3001/paid
 ```
 
-The mock payment header passes `basic` verification because it has correct structure, matching recipient, and valid signature format.
+A mock payment header passes `basic` verification when it has correct structure, matching recipient, sufficient amount, and valid signature format (132 chars starting with `0x`).

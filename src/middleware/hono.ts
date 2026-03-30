@@ -67,6 +67,14 @@ function buildRequirementsForPrice(priceUsd: number): {
     else if (chain.startsWith('cardano:')) payTo = cfg.cardano?.address ?? '';
     if (!payTo) continue;
 
+    // Build extra field based on chain type
+    let extra: Record<string, unknown> | undefined;
+    if (chain.startsWith('eip155:')) {
+      extra = { name: chain === 'eip155:84532' ? 'USDC' : 'USD Coin', version: '2' };
+    } else if (chain.startsWith('solana:')) {
+      extra = { feePayer: '2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4', description: 'x402 payment' };
+    }
+
     accepts.push({
       scheme: 'exact',
       network: chain,
@@ -74,9 +82,7 @@ function buildRequirementsForPrice(priceUsd: number): {
       amount: amountMicro,
       maxTimeoutSeconds: 300,
       payTo,
-      ...(chain.startsWith('eip155:') ? {
-        extra: { name: chain === 'eip155:84532' ? 'USDC' : 'USD Coin', version: '2' },
-      } : {}),
+      extra,
     });
   }
 
@@ -137,7 +143,15 @@ export function x402Hono(options: HonoX402Options = {}): MiddlewareHandler {
     }
 
     if (options.toolName) {
-      settleWithFacilitator(payment, options.toolName).catch(console.error);
+      settleWithFacilitator(payment, options.toolName)
+        .then((result) => {
+          if (result.success) {
+            console.log(`[x402] Settlement successful: ${result.txHash ?? 'no tx hash'}`);
+          } else {
+            console.error(`[x402] Settlement failed: ${result.error}`);
+          }
+        })
+        .catch((err) => console.error(`[x402] Settlement error:`, err));
     }
 
     return next();

@@ -1,18 +1,13 @@
 /**
  * Solana Chain Support
- * 
+ *
  * SPL Token transfer verification
  */
 
 import { getConfig } from '../config.js';
 
-export interface SolanaPaymentPayload {
-  signature: string;
-  from: string;
-  to: string;
-  amount: string;
-  mint: string;
-}
+export type { SolanaPaymentPayload } from '../types/solana.types.js';
+import type { SolanaPaymentPayload } from '../types/solana.types.js';
 
 /**
  * Verify Solana SPL token payment

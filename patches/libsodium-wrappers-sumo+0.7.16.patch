@@ -1,0 +1,7 @@
+diff --git a/node_modules/libsodium-wrappers-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs b/node_modules/libsodium-wrappers-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs
+new file mode 100644
+index 0000000..cefd200
+--- /dev/null
++++ b/node_modules/libsodium-wrappers-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs
+@@ -0,0 +1 @@
++export { default } from '../../../libsodium-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs';

@@ -1,0 +1,546 @@
+/**
+ * Cardano adapter tests.
+ *
+ * @lucid-evolution/lucid is mocked via jest.unstable_mockModule so its heavy
+ * WASM dependencies (libsodium) are never loaded. The module under test uses
+ * dynamic import() internally, which picks up the mock automatically.
+ */
+
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+
+// ---------------------------------------------------------------------------
+// Shared mock state — mutated by individual tests
+// ---------------------------------------------------------------------------
+
+const MOCK_CBOR    = 'deadbeef01020304';
+const MOCK_TX_HASH = 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
+
+// CML output list that tests populate before each assertion
+let mockCmlOutputs: Array<{
+  address: string;
+  lovelace: bigint;
+  /** unit → amount for native assets */
+  tokenAmounts?: Map<string, bigint>;
+}> = [];
+
+function buildMockCmlTx() {
+  return {
+    body: () => ({
+      outputs: () => ({
+        len: () => mockCmlOutputs.length,
+        get: (i: number) => {
+          const o = mockCmlOutputs[i];
+          return {
+            address: () => ({ to_bech32: (_prefix: unknown) => o.address }),
+            amount: () => ({
+              coin: () => o.lovelace,
+              multi_asset: () => {
+                if (!o.tokenAmounts || o.tokenAmounts.size === 0) return null;
+                // For unit tests each output has at most one token type
+                const tokenValue = [...o.tokenAmounts.values()][0] ?? 0n;
+                return {
+                  get: (_policy: unknown, _asset: unknown) => tokenValue,
+                };
+              },
+            }),
+          };
+        },
+      }),
+    }),
+  };
+}
+
+// Stable mock function references used in both the mock factory and test assertions
+const mockToCBOR      = jest.fn<() => string>().mockReturnValue(MOCK_CBOR);
+const mockComplete2   = jest.fn<() => Promise<{ toCBOR: () => string }>>()
+  .mockResolvedValue({ toCBOR: mockToCBOR });
+const mockWithWallet  = jest.fn().mockReturnValue({ complete: mockComplete2 });
+const mockComplete1   = jest.fn<() => Promise<{ sign: { withWallet: () => unknown } }>>()
+  .mockResolvedValue({ sign: { withWallet: mockWithWallet } });
+const mockPayToAddress = jest.fn().mockReturnValue({ complete: mockComplete1 });
+const mockNewTx        = jest.fn().mockReturnValue({ pay: { ToAddress: mockPayToAddress } });
+const mockFromSeed  = jest.fn();
+const mockAwaitTx   = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+const mockGetUtxos  = jest.fn<() => Promise<Array<{ assets: Record<string, bigint> }>>>()
+  .mockResolvedValue([{ assets: { lovelace: 100_000_000n } }]);
+
+const mockLucidInstance = {
+  newTx: mockNewTx,
+  selectWallet: { fromSeed: mockFromSeed },
+  awaitTx: mockAwaitTx,
+  wallet: () => ({ getUtxos: mockGetUtxos }),
+};
+const mockLucid      = jest.fn<() => Promise<typeof mockLucidInstance>>()
+  .mockResolvedValue(mockLucidInstance);
+const mockBlockfrost = jest.fn();
+
+const mockFromCborHex     = jest.fn(() => buildMockCmlTx());
+const mockScriptHashFromHex = jest.fn().mockReturnValue({});
+const mockAssetNameFromHex  = jest.fn().mockReturnValue({});
+
+// ---------------------------------------------------------------------------
+// Register mock BEFORE importing the module under test
+// ---------------------------------------------------------------------------
+jest.unstable_mockModule('@lucid-evolution/lucid', () => ({
+  Lucid:      mockLucid,
+  Blockfrost: mockBlockfrost,
+  CML: {
+    Transaction: { from_cbor_hex: mockFromCborHex },
+    ScriptHash:  { from_hex: mockScriptHashFromHex },
+    AssetName:   { from_hex: mockAssetNameFromHex },
+  },
+}));
+
+// Dynamic import AFTER mock registration — picks up the mocked Lucid
+const {
+  signCardanoPayment,
+  verifyCardanoPayment,
+  submitCardanoTx,
+  getCardanoWalletBalances,
+  getTokenUnit,
+  detectNetwork,
+  IUSD_POLICY_ID,
+  USDM_POLICY_ID,
+  DJED_POLICY_ID,
+  USDCX_POLICY_ID,
+  USDM_ASSET_HEX,
+  DJED_ASSET_HEX,
+  USDCX_ASSET_HEX,
+  KNOWN_CARDANO_TOKENS,
+  MIN_ADA_LOVELACE,
+  IUSD_DECIMALS,
+  iUSDToUnits,
+  usdToCardanoUnits,
+} = await import('../chains/cardano.js');
+
+// ---------------------------------------------------------------------------
+const RECIPIENT = 'addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n8yslh0wxj0he7f6jw0ungfyzfzs72ux9sfaz398jnkqvqpfq3';
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockCmlOutputs = [];
+  // Re-apply default return values after clearAllMocks
+  mockToCBOR.mockReturnValue(MOCK_CBOR);
+  mockComplete2.mockResolvedValue({ toCBOR: mockToCBOR });
+  mockWithWallet.mockReturnValue({ complete: mockComplete2 });
+  mockComplete1.mockResolvedValue({ sign: { withWallet: mockWithWallet } });
+  mockPayToAddress.mockReturnValue({ complete: mockComplete1 });
+  mockNewTx.mockReturnValue({ pay: { ToAddress: mockPayToAddress } });
+  mockLucid.mockResolvedValue(mockLucidInstance);
+  mockFromCborHex.mockImplementation(() => buildMockCmlTx());
+  mockScriptHashFromHex.mockReturnValue({});
+  mockAssetNameFromHex.mockReturnValue({});
+  mockAwaitTx.mockResolvedValue(undefined);
+  // Rich default UTxO — enough lovelace and all known stablecoins to pass
+  // the balance check in signCardanoPayment for every existing test case.
+  mockGetUtxos.mockResolvedValue([{
+    assets: {
+      lovelace: 100_000_000n,
+      [`${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`]: 100_000_000n,
+      [`${USDM_POLICY_ID}${USDM_ASSET_HEX}`]:                      100_000_000n,
+      [`${DJED_POLICY_ID}${DJED_ASSET_HEX}`]:                      100_000_000n,
+    },
+  }]);
+});
+
+// ---------------------------------------------------------------------------
+// Token constants
+// ---------------------------------------------------------------------------
+
+describe('token constants', () => {
+  it('all policy IDs are 56 hex chars (28 bytes)', () => {
+    expect(IUSD_POLICY_ID).toHaveLength(56);
+    expect(USDM_POLICY_ID).toHaveLength(56);
+    expect(DJED_POLICY_ID).toHaveLength(56);
+    expect(USDCX_POLICY_ID).toHaveLength(56);
+  });
+
+  it('KNOWN_CARDANO_TOKENS contains all 4 stablecoins', () => {
+    const symbols = Object.values(KNOWN_CARDANO_TOKENS).map((t) => t.symbol);
+    expect(symbols).toContain('iUSD');
+    expect(symbols).toContain('USDM');
+    expect(symbols).toContain('DJED');
+    expect(symbols).toContain('USDCx');
+  });
+
+  it('KNOWN_CARDANO_TOKENS keys equal policyId + assetNameHex', () => {
+    for (const [key, token] of Object.entries(KNOWN_CARDANO_TOKENS)) {
+      expect(key).toBe(token.policyId + token.assetNameHex);
+    }
+  });
+
+  it('all known tokens have decimals: 6', () => {
+    for (const token of Object.values(KNOWN_CARDANO_TOKENS)) {
+      expect(token.decimals).toBe(6);
+    }
+  });
+
+  it('USDM uses CIP-68 asset name prefix 0014df10', () => {
+    expect(USDM_ASSET_HEX.startsWith('0014df10')).toBe(true);
+  });
+
+  it('DJED asset name decodes to DjedMicroUSD', () => {
+    expect(Buffer.from(DJED_ASSET_HEX, 'hex').toString('utf8')).toBe('DjedMicroUSD');
+  });
+
+  it('USDCx asset name decodes to USDCx', () => {
+    expect(Buffer.from(USDCX_ASSET_HEX, 'hex').toString('utf8')).toBe('USDCx');
+  });
+
+  it('MIN_ADA_LOVELACE is 2_000_000n', () => {
+    expect(MIN_ADA_LOVELACE).toBe(2_000_000n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectNetwork
+// ---------------------------------------------------------------------------
+
+describe('detectNetwork', () => {
+  it('detects preprod from addr_test1 prefix', () => {
+    expect(detectNetwork('addr_test1abc')).toBe('cardano-preprod');
+  });
+
+  it('detects mainnet from addr1 prefix', () => {
+    expect(detectNetwork('addr1abc')).toBe('cardano');
+  });
+
+  it('defaults to mainnet for unknown prefixes', () => {
+    expect(detectNetwork('unknown')).toBe('cardano');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// signCardanoPayment
+// ---------------------------------------------------------------------------
+
+describe('signCardanoPayment', () => {
+  const BASE = {
+    seed: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+    toAddress: RECIPIENT,
+    amount: 5_000_000n,
+    blockfrostProjectId: 'mainnetXXXX',
+  };
+
+  it('returns payload with the signed tx CBOR', async () => {
+    const payload = await signCardanoPayment(BASE);
+    expect(payload.transaction).toBe(MOCK_CBOR);
+  });
+
+  it('initialises Lucid with Mainnet by default', async () => {
+    await signCardanoPayment(BASE);
+    expect(mockLucid).toHaveBeenCalledWith(expect.anything(), 'Mainnet');
+  });
+
+  it('initialises Lucid with Preprod when specified', async () => {
+    await signCardanoPayment({ ...BASE, network: 'Preprod' });
+    expect(mockLucid).toHaveBeenCalledWith(expect.anything(), 'Preprod');
+  });
+
+  it('selects wallet from seed phrase', async () => {
+    await signCardanoPayment(BASE);
+    expect(mockFromSeed).toHaveBeenCalledWith(BASE.seed);
+  });
+
+  it('pays ADA using lovelace asset key', async () => {
+    await signCardanoPayment({ ...BASE, token: 'ADA' });
+    expect(mockPayToAddress).toHaveBeenCalledWith(RECIPIENT, { lovelace: 5_000_000n });
+  });
+
+  it('pays USDM with token unit and min-ADA alongside', async () => {
+    await signCardanoPayment({ ...BASE, token: 'USDM', amount: 10_000_000n });
+    const [addr, assets] = (mockPayToAddress as jest.Mock).mock.calls[0] as [string, Record<string, bigint>];
+    expect(addr).toBe(RECIPIENT);
+    expect(assets['lovelace']).toBe(MIN_ADA_LOVELACE);
+    expect(assets[`${USDM_POLICY_ID}${USDM_ASSET_HEX}`]).toBe(10_000_000n);
+  });
+
+  it('pays DJED with token unit and min-ADA alongside', async () => {
+    await signCardanoPayment({ ...BASE, token: 'DJED', amount: 20_000_000n });
+    const [, assets] = (mockPayToAddress as jest.Mock).mock.calls[0] as [string, Record<string, bigint>];
+    expect(assets['lovelace']).toBe(MIN_ADA_LOVELACE);
+    expect(assets[`${DJED_POLICY_ID}${DJED_ASSET_HEX}`]).toBe(20_000_000n);
+  });
+
+  it('chains newTx → pay.ToAddress → complete → sign.withWallet → complete → toCBOR', async () => {
+    await signCardanoPayment(BASE);
+    expect(mockNewTx).toHaveBeenCalled();
+    expect(mockPayToAddress).toHaveBeenCalled();
+    expect(mockComplete1).toHaveBeenCalled();
+    expect(mockWithWallet).toHaveBeenCalled();
+    expect(mockComplete2).toHaveBeenCalled();
+    expect(mockToCBOR).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verifyCardanoPayment
+// ---------------------------------------------------------------------------
+
+describe('verifyCardanoPayment', () => {
+  const PAYLOAD = { transaction: MOCK_CBOR };
+
+  it('returns INVALID_CBOR when CBOR cannot be parsed', async () => {
+    mockFromCborHex.mockImplementationOnce(() => { throw new Error('bad cbor'); });
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 2_000_000n);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('INVALID_CBOR');
+  });
+
+  it('returns OUTPUT_MISMATCH when outputs list is empty', async () => {
+    mockCmlOutputs = [];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 2_000_000n);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('OUTPUT_MISMATCH');
+  });
+
+  it('returns OUTPUT_MISMATCH when output goes to wrong address', async () => {
+    mockCmlOutputs = [{ address: 'addr1wrongaddress', lovelace: 5_000_000n }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 2_000_000n);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('OUTPUT_MISMATCH');
+  });
+
+  it('returns OUTPUT_MISMATCH when ADA output is below expected', async () => {
+    mockCmlOutputs = [{ address: RECIPIENT, lovelace: 1_000_000n }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 2_000_000n);
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('OUTPUT_MISMATCH');
+  });
+
+  it('accepts valid ADA payment (exact amount)', async () => {
+    mockCmlOutputs = [{ address: RECIPIENT, lovelace: 2_000_000n }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 2_000_000n);
+    expect(result.valid).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('accepts valid ADA payment (surplus)', async () => {
+    mockCmlOutputs = [{ address: RECIPIENT, lovelace: 10_000_000n }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 2_000_000n);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts valid USDM token payment', async () => {
+    const unit = `${USDM_POLICY_ID}${USDM_ASSET_HEX}`;
+    mockCmlOutputs = [{ address: RECIPIENT, lovelace: MIN_ADA_LOVELACE, tokenAmounts: new Map([[unit, 5_000_000n]]) }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n, 'USDM');
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects USDM payment with insufficient token amount', async () => {
+    const unit = `${USDM_POLICY_ID}${USDM_ASSET_HEX}`;
+    mockCmlOutputs = [{ address: RECIPIENT, lovelace: MIN_ADA_LOVELACE, tokenAmounts: new Map([[unit, 1_000_000n]]) }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 5_000_000n, 'USDM');
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('OUTPUT_MISMATCH');
+  });
+
+  it('rejects DJED payment when lovelace is below min-ADA', async () => {
+    const unit = `${DJED_POLICY_ID}${DJED_ASSET_HEX}`;
+    mockCmlOutputs = [{ address: RECIPIENT, lovelace: 1_000_000n, tokenAmounts: new Map([[unit, 10_000_000n]]) }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 10_000_000n, 'DJED');
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('OUTPUT_MISMATCH');
+  });
+
+  it('accepts valid DJED payment with sufficient lovelace and token amount', async () => {
+    const unit = `${DJED_POLICY_ID}${DJED_ASSET_HEX}`;
+    mockCmlOutputs = [{ address: RECIPIENT, lovelace: MIN_ADA_LOVELACE, tokenAmounts: new Map([[unit, 10_000_000n]]) }];
+    const result = await verifyCardanoPayment(PAYLOAD, RECIPIENT, 10_000_000n, 'DJED');
+    expect(result.valid).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// submitCardanoTx
+// ---------------------------------------------------------------------------
+
+describe('submitCardanoTx', () => {
+  const MAINNET_URL = 'https://cardano-mainnet.blockfrost.io/api/v0';
+  const PREPROD_URL = 'https://cardano-preprod.blockfrost.io/api/v0';
+  const realFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  it('returns txHash on a successful submission', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(`"${MOCK_TX_HASH}"`, { status: 200 }),
+    );
+    const result = await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123');
+    expect(result.txHash).toBe(MOCK_TX_HASH);
+  });
+
+  it('posts to /tx/submit with correct headers for Mainnet', async () => {
+    let capturedUrl = '';
+    let capturedInit: RequestInit = {};
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      capturedUrl  = input as string;
+      capturedInit = init ?? {};
+      return new Response(`"${MOCK_TX_HASH}"`, { status: 200 });
+    });
+    await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123');
+    expect(capturedUrl).toContain('cardano-mainnet.blockfrost.io');
+    expect(capturedUrl).toContain('/tx/submit');
+    expect((capturedInit.headers as Record<string, string>)['project_id']).toBe('proj123');
+    expect((capturedInit.headers as Record<string, string>)['Content-Type']).toBe('application/cbor');
+    expect(capturedInit.method).toBe('POST');
+  });
+
+  it('posts to the Preprod endpoint when given a preprod URL', async () => {
+    let capturedUrl = '';
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+      capturedUrl = input as string;
+      return new Response(`"${MOCK_TX_HASH}"`, { status: 200 });
+    });
+    await submitCardanoTx(MOCK_CBOR, PREPROD_URL, 'proj123');
+    expect(capturedUrl).toContain('cardano-preprod.blockfrost.io');
+  });
+
+  it('throws on a non-ok Blockfrost response', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response('{"error":"invalid tx"}', { status: 400 }),
+    );
+    await expect(submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123')).rejects.toThrow(
+      /Blockfrost submission failed/,
+    );
+  });
+
+  it('calls lucid.awaitTx when awaitConfirmation is true', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(`"${MOCK_TX_HASH}"`, { status: 200 }),
+    );
+    await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123', { awaitConfirmation: true });
+    expect(mockAwaitTx).toHaveBeenCalledWith(MOCK_TX_HASH);
+  });
+
+  it('does not call lucid.awaitTx when awaitConfirmation is absent', async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(`"${MOCK_TX_HASH}"`, { status: 200 }),
+    );
+    await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123');
+    expect(mockAwaitTx).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit-conversion helpers
+// ---------------------------------------------------------------------------
+
+describe('getTokenUnit', () => {
+  it('ADA → "lovelace"', () => {
+    expect(getTokenUnit('ADA')).toBe('lovelace');
+  });
+
+  it('iUSD → policyId + hex("iUSD")', () => {
+    const expected = `${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`;
+    expect(getTokenUnit('iUSD')).toBe(expected);
+    expect(getTokenUnit('iUSD')).toBe(
+      'f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b6988069555344',
+    );
+  });
+
+  it('USDM → policyId + USDM_ASSET_HEX', () => {
+    expect(getTokenUnit('USDM')).toBe(`${USDM_POLICY_ID}${USDM_ASSET_HEX}`);
+  });
+
+  it('DJED → policyId + DJED_ASSET_HEX', () => {
+    expect(getTokenUnit('DJED')).toBe(`${DJED_POLICY_ID}${DJED_ASSET_HEX}`);
+  });
+});
+
+describe('unit conversion helpers', () => {
+  it('IUSD_DECIMALS is 6', () => {
+    expect(IUSD_DECIMALS).toBe(6);
+  });
+
+  it('iUSDToUnits(0.01) === 10_000n', () => {
+    expect(iUSDToUnits(0.01)).toBe(10_000n);
+  });
+
+  it('iUSDToUnits(1) === 1_000_000n', () => {
+    expect(iUSDToUnits(1)).toBe(1_000_000n);
+  });
+
+  it('usdToCardanoUnits(0.01, "iUSD") === 10_000n', () => {
+    expect(usdToCardanoUnits(0.01, 'iUSD')).toBe(10_000n);
+  });
+
+  it('usdToCardanoUnits(2, "ADA") === 2_000_000n (lovelace)', () => {
+    expect(usdToCardanoUnits(2, 'ADA')).toBe(2_000_000n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// signCardanoPayment — balance check
+// ---------------------------------------------------------------------------
+
+describe('signCardanoPayment balance check', () => {
+  const BASE = {
+    seed: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+    toAddress: RECIPIENT,
+    blockfrostProjectId: 'mainnetXXXX',
+  };
+
+  it('throws a clear error when ADA balance is insufficient', async () => {
+    // 1 ADA — not enough for 5 ADA + fee buffer
+    mockGetUtxos.mockResolvedValueOnce([{ assets: { lovelace: 1_000_000n } }]);
+    await expect(
+      signCardanoPayment({ ...BASE, amount: 5_000_000n, token: 'ADA' }),
+    ).rejects.toThrow(/Insufficient ADA balance/);
+  });
+
+  it('throws a clear error when iUSD balance is insufficient', async () => {
+    // wallet has only 5_000 iUSD units, but 10_000 are required
+    const iUSDUnit = `${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`;
+    mockGetUtxos.mockResolvedValueOnce([
+      { assets: { lovelace: 100_000_000n, [iUSDUnit]: 5_000n } },
+    ]);
+    await expect(
+      signCardanoPayment({ ...BASE, amount: 10_000n, token: 'iUSD' }),
+    ).rejects.toThrow(/Insufficient iUSD balance/);
+  });
+
+  it('proceeds when balance is sufficient', async () => {
+    // 100 ADA — enough for 2 ADA + fees
+    mockGetUtxos.mockResolvedValueOnce([{ assets: { lovelace: 100_000_000n } }]);
+    const result = await signCardanoPayment({ ...BASE, amount: 2_000_000n, token: 'ADA' });
+    expect(result.transaction).toBe(MOCK_CBOR);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getCardanoWalletBalances
+// ---------------------------------------------------------------------------
+
+describe('getCardanoWalletBalances', () => {
+  const iUSDUnit = `${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`;
+
+  it('returns lovelace and known-token balances aggregated across UTxOs', async () => {
+    mockGetUtxos.mockResolvedValueOnce([
+      { assets: { lovelace: 50_000_000n, [iUSDUnit]: 1_000_000n } },
+      { assets: { lovelace: 30_000_000n } },
+    ]);
+    const balances = await getCardanoWalletBalances({
+      seed: 'test',
+      blockfrostProjectId: 'proj',
+    });
+    expect(balances['lovelace']).toBe(80_000_000n);
+    expect(balances['iUSD']).toBe(1_000_000n);
+    expect(balances['USDM']).toBe(0n);
+    expect(balances['DJED']).toBe(0n);
+    expect(balances['USDCx']).toBe(0n);
+  });
+
+  it('returns all zeros when wallet has no tokens', async () => {
+    mockGetUtxos.mockResolvedValueOnce([{ assets: { lovelace: 5_000_000n } }]);
+    const balances = await getCardanoWalletBalances({
+      seed: 'test',
+      blockfrostProjectId: 'proj',
+    });
+    expect(balances['iUSD']).toBe(0n);
+    expect(balances['USDM']).toBe(0n);
+  });
+});

@@ -31,9 +31,11 @@ describe('x402 Verification', () => {
       signature: '0x' + 'ab'.repeat(65),
     },
     accepted: {
+      scheme: 'exact',
       network: 'eip155:8453',
       asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
       amount: '10000',
+      payTo: '0x1234567890123456789012345678901234567890',
     },
   };
 
@@ -47,9 +49,11 @@ describe('x402 Verification', () => {
       mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     },
     accepted: {
+      scheme: 'exact',
       network: 'solana:mainnet',
       asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
       amount: '10000',
+      payTo: 'SoLAddressHere123456789012345678901234567890',
     },
   };
 
@@ -180,14 +184,14 @@ describe('x402 Verification', () => {
       expect(result.error).toContain('Unsupported');
     });
 
-    it('returns not implemented for Cardano', async () => {
+    it('rejects invalid Cardano payload', async () => {
       const cardano = {
         ...validEvmPayload,
         accepted: { ...validEvmPayload.accepted, network: 'cardano:mainnet' },
       };
       const result = await verifyPayment(cardano, 0.01);
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('not yet implemented');
+      expect(result.error).toContain('INVALID_CBOR');
     });
   });
 });

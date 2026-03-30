@@ -11,44 +11,6 @@
 
 ---
 
-## Repository structure
-
-```
-src/
-├── index.ts            # Re-exports everything public
-├── config.ts           # configure(), getConfig(), USDC_CONTRACTS
-├── pricing.ts          # setToolPrices(), buildPaymentRequirements(), DEFAULT_TIERS
-├── verify.ts           # parsePaymentHeader(), verifyPayment() — chain router
-├── client.ts           # signPayment(), buildPaymentPayload(), parsePaymentRequired()
-├── facilitator.ts      # verifyWithFacilitator(), settleWithFacilitator(), processPayment()
-├── chains/
-│   ├── evm.ts          # verifyPayment(), signEIP3009(), EvmPaymentPayload
-│   └── solana.ts       # verifyPayment(), SolanaPaymentPayload (stub)
-├── middleware/
-│   └── mcp.ts          # withX402() tool wrapper, checkPayment()
-├── transport/
-│   ├── payment-fetch.ts  # createPaymentFetch() — fetch with auto 402 handling
-│   ├── server.ts         # withX402Server() — Web Standard Request/Response middleware
-│   └── simple-http.ts    # SimpleHTTPTransport (JSON-RPC over HTTP, no SSE)
-├── proxy/
-│   ├── client-proxy.ts   # createClientProxy() — payment-aware MCP proxy
-│   └── passthrough.ts    # createPassthroughProxy()
-├── signer/
-│   ├── server.ts         # SignerServer — isolated process, holds private keys
-│   ├── client.ts         # SignerClient — IPC to signer over Unix socket or subprocess
-│   └── types.ts          # SignRequest, SignResponse, SignerConfig
-├── vault/
-│   └── crypto.ts         # Vault — AES-256-GCM encrypted key storage (PBKDF2)
-├── policy/
-│   └── engine.ts         # PolicyEngine — spending limits, allowlists, audit log
-└── split/
-    ├── client.ts         # createSplitClient()
-    ├── gate.ts           # wrapWithSplitPayment()
-    └── jwt.ts            # verifyJWT(), fetchPublicKey()
-```
-
----
-
 ## Chain adapter contract
 
 Every chain adapter lives in `src/chains/{chain}.ts` and must export:

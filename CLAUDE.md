@@ -1,0 +1,225 @@
+# CLAUDE.md — @qbtlabs/x402
+
+## Project overview
+
+`@qbtlabs/x402` is a multi-chain payment protocol SDK for AI agents, MCP servers, and HTTP APIs. It enables monetisation via the x402 standard (HTTP 402 Payment Required): any tool or endpoint can gate access behind a micropayment, settled on-chain in USDC.
+
+- **Chain status**: Base L2 (EVM) ✅ | Cardano ✅ | Solana in progress
+- **npm**: `@qbtlabs/x402`
+- **Protocol**: x402 v1 — payment is a base64-encoded JSON header sent as `X-PAYMENT` (HTTP) or `paymentSignature` param (MCP)
+- **Currency**: USDC, 6 decimal places (`1_000_000 = $1.00`)
+
+---
+
+## Types
+
+Shared payload interfaces and token constants live in `src/types/`:
+
+- `evm.types.ts` — `EvmPaymentPayload`, `SignEIP3009Options`, `SignEIP3009Result`
+- `solana.types.ts` — `SolanaPaymentPayload`
+- `cardano.types.ts` — `CardanoPaymentPayload`, `CardanoToken`, `KnownToken`, policy IDs + asset hex for all supported tokens
+- `index.ts` — re-exports all three
+
+Chain adapters in `src/chains/` import from `../types/` rather than defining types inline.
+
+---
+
+## Chain adapter contract
+
+Every chain adapter lives in `src/chains/{chain}.ts` and must export:
+
+```typescript
+// Payload interface — in src/types/{chain}.types.ts
+export interface {Chain}PaymentPayload { ... }
+
+// Server-side: validate the payload covers the price
+export async function verifyPayment(
+  payment: {Chain}PaymentPayload,
+  expectedAmount: number         // USD, e.g. 0.001
+): Promise<{ valid: boolean; error?: string }>
+
+// Client-side: sign a payment
+export async function sign{Chain}(...): Promise<...>
+```
+
+`verify.ts` is the single routing entry point — it switches on `payment.accepted.network`:
+
+```typescript
+if (network.startsWith('eip155:'))  → verifyEvmPayment()
+if (network.startsWith('solana:'))  → verifySolanaPayment()
+if (network.startsWith('cardano:')) → verifyCardanoPayment()
+```
+
+`buildPaymentRequirements()` in `pricing.ts` reads `getActiveChains()` from `config.ts`, which is populated by `configure()`. Adding a new chain requires touching all three.
+
+---
+
+## Core flow
+
+### Server side
+
+1. `configure({ evm: { address }, testnet: true })` — sets the receiver address(es)
+2. `setToolPrices({ get_ticker: 'read', place_order: 'write' })` — maps tool names to tiers
+3. Wrap handlers: `server.tool('get_ticker', schema, withX402('get_ticker', handler))`
+   - `withX402()` reads `paymentSignature` from MCP params
+   - Returns a 402-like JSON error with `buildPaymentRequirements()` output if missing/invalid
+   - **Or** use `withX402Server(handler)` for HTTP — intercepts `X-PAYMENT` header, verifies + settles via facilitator before calling `handler`
+
+### Client side
+
+1. `parsePaymentRequired(response)` — extracts `accepts[]` from a 402 response
+2. `signPayment(requirement, privateKey)` — dispatches to the right chain signer
+3. `buildPaymentPayload(signed)` — base64-encodes for the header
+4. Retry with `X-PAYMENT: <base64>` header
+   - `createPaymentFetch()` automates steps 1–4
+
+### Verification routing (verify.ts)
+
+`verifyPayment(payment, expectedAmount)`:
+- Reads `payment.accepted.network` prefix
+- Calls chain-specific verifier
+- Returns `{ valid, error?, details? }`
+
+---
+
+## Cardano adapter
+
+`src/chains/cardano.ts` — uses **Lucid Evolution** (`@lucid-evolution/lucid`) loaded lazily to avoid WASM init cost at import time.
+
+**Client-side:**
+- `signCardanoPayment(options)` — builds and signs a Lucid transaction; payload is `{ transaction: "<hex CBOR>" }`
+- `getCardanoWalletBalances(options)` — returns balances for all supported tokens
+
+**Server-side:**
+- `verifyCardanoPayment(payment, expectedAmount)` — deserialises CBOR via CML, inspects outputs; structural only (no chain call)
+- `submitCardanoTx(txCbor, options)` — submits signed CBOR to Blockfrost REST API
+
+**Supported tokens:** ADA, iUSD (Indigo), USDM (Mehen), DJED (COTI/IOG), USDCx (Circle xReserve)
+
+**Wire format:** `X-PAYMENT` header carries a base64-encoded JSON `PaymentPayload` where `payload.transaction` is the signed CBOR hex.
+
+**Network detection:** `addr_test1…` prefix → `cardano:preprod`; otherwise → `cardano:mainnet`.
+
+Token constants (policy IDs, asset name hex) live in `src/types/cardano.types.ts`.
+
+---
+
+## Framework middleware
+
+Beyond the MCP wrapper (`withX402`) and generic HTTP handler (`withX402Server`), two framework-specific adapters are available:
+
+| Import | Middleware | Usage |
+|--------|-----------|-------|
+| `@qbtlabs/x402/express` | `x402Express(options)` | Express route middleware |
+| `@qbtlabs/x402/hono` | `x402Hono(options)` | Hono route middleware |
+
+Both accept `{ price?, tier?, toolName? }`. When `toolName` is provided, pricing is looked up from the registered tool table and settlement fires asynchronously after verification. Note: Hono already works with `withX402Server()` (Web Standard API) — `x402Hono` just provides idiomatic Context API style.
+
+---
+
+## Pricing tiers
+
+Defined in `src/pricing.ts`:
+
+| Tier       | Default USD |
+|------------|-------------|
+| `free`     | $0.000      |
+| `read`     | $0.001      |
+| `analysis` | $0.005      |
+| `write`    | $0.010      |
+
+Amounts are stored as USDC micro-units: `Math.ceil(priceUsd * 1_000_000)`.
+
+---
+
+## USDC contract addresses
+
+From `src/config.ts`:
+
+| Network           | Address |
+|-------------------|---------|
+| `eip155:8453`     | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (Base mainnet) |
+| `eip155:84532`    | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (Base Sepolia) |
+| `solana:mainnet`  | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
+| `solana:devnet`   | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` |
+
+EIP-712 domain name for USDC: `"USDC"` on Base Sepolia (`chainId 84532`), `"USD Coin"` on mainnet.
+
+### Cardano (policy IDs)
+
+Lucid UTxO unit = `policyId + assetNameHex` concatenated. Constants are in `src/types/cardano.types.ts`.
+
+| Token | Policy ID | Asset Name Hex |
+|-------|-----------|----------------|
+| iUSD  | `f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880` | `69555344` |
+| USDM  | `c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad` | `0014df105553444d` |
+| DJED  | `8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61` | `446a65644d6963726f555344` |
+| USDCx | `1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e34` | `5553444378` |
+
+ADA uses the special unit string `lovelace`.
+
+---
+
+## Dependencies
+
+Direct:
+
+| Package | Purpose |
+|---------|---------|
+| `viem ^2.47.4` | EVM: `privateKeyToAccount`, `signTypedData` (EIP-3009) |
+| `@lucid-evolution/lucid` | Cardano: transaction building + signing |
+| `@noble/curves ^2.0.0` | Low-level elliptic curve crypto |
+| `@noble/hashes ^2.0.0` | Hashing utilities |
+| `@modelcontextprotocol/sdk ^1.12.0` | MCP server/transport types |
+
+Peer/optional deps: `express` (for `x402Express`), `hono` (for `x402Hono`).
+
+`@solana/web3.js` and `@noble/ed25519` are **not** currently in dependencies — the Solana adapter (`src/chains/solana.ts`) is a stub that verifies structure only, no cryptographic proof yet.
+
+---
+
+## Coding conventions
+
+- **TypeScript strict** (`"strict": true` in tsconfig)
+- **Named exports only** — no default exports anywhere
+- **ESM throughout** — `"type": "module"`, `.js` extensions on all internal imports
+- **Pure functions in `chains/`** — no Express/Hono/Node.js-specific deps; chain modules must be importable in Workers/Deno
+- **Framework-specific code** goes in `transport/` or separate entry points
+- **No `console.log`** in library code; use `console.warn` only for degraded-mode notices
+- USDC amounts are always integers (micro-units, `bigint` or `string` representing bigint)
+- `verifyMode: 'basic'` (default) validates structure + business rules; `'full'` adds on-chain crypto (currently warns and falls back to basic for EVM)
+
+---
+
+## Branch and commit rules
+
+- Branch naming: `feat/qbt-{issue-number}-{short-description}`
+- Commit style: `feat(qbt-NNN): short description`
+- **Never** include "Claude" or "Co-Authored-By: Claude" in any commit message
+- **Never** commit `.env`, private keys, or secrets
+- Keep chain modules free of Node.js-only APIs
+
+---
+
+## Binary entry points
+
+| Command | Source |
+|---------|--------|
+| `x402-proxy` / `qbtlabs-x402` | `src/scripts/client-proxy.ts` |
+| `x402-vault` | `src/scripts/vault-cli.ts` |
+| `x402-signer` | `src/scripts/signer-cli.ts` |
+| `x402-policy` | `src/scripts/policy-cli.ts` |
+
+---
+
+## Testing
+
+```bash
+npm test                    # jest with --experimental-vm-modules
+npm run test:coverage
+npm run build               # tsc → dist/
+```
+
+Tests live in `src/__tests__/`. Use real chain IDs in tests, not mocks of network state.
+
+Integration tests that hit Blockfrost (Cardano submission) are gated behind `BLOCKFROST_PROJECT_ID` being set in the environment — they skip automatically if the env var is absent. Unit tests for payload parsing and amount checks run unconditionally.

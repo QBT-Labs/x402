@@ -212,6 +212,32 @@ Peer/optional deps: `express` (for `x402Express`), `hono` (for `x402Hono`).
 
 ---
 
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `X402_EVM_ADDRESS` | Yes* | Your EVM wallet address (receives USDC). If not set, middleware is disabled and passes all requests through. |
+| `X402_SOLANA_ADDRESS` | No | Your Solana wallet address |
+| `X402_CARDANO_ADDRESS` | No | Your Cardano wallet address |
+| `X402_TESTNET` | No | `true` = Base Sepolia. Default = Base mainnet. |
+| `X402_VERIFY_MODE` | No | `basic` (default) or `full`. Basic = structure + recipient + amount check, no on-chain verification. |
+| `BLOCKFROST_PROJECT_ID` | For Cardano | Blockfrost mainnet project ID for Cardano submission/verification |
+
+*At least one address (EVM/Solana/Cardano) is required to enable x402 payment checks.
+
+---
+
+## Verify Modes
+
+| Mode | Checks | Use Case |
+|------|--------|----------|
+| `basic` | Structure valid, recipient matches, amount sufficient, signature format valid (132 chars) | Local testing, development |
+| `full` | All of basic + cryptographic signature verification on-chain | Production |
+
+In `basic` mode, a properly formatted mock payment header will pass verification without real on-chain settlement.
+
+---
+
 ## Testing
 
 ```bash
@@ -223,3 +249,28 @@ npm run build               # tsc → dist/
 Tests live in `src/__tests__/`. Use real chain IDs in tests, not mocks of network state.
 
 Integration tests that hit Blockfrost (Cardano submission) are gated behind `BLOCKFROST_PROJECT_ID` being set in the environment — they skip automatically if the env var is absent. Unit tests for payload parsing and amount checks run unconditionally.
+
+### Live E2E Testing (Hono / Express)
+
+Test the middleware locally without real payments:
+
+```bash
+# 1. Set environment
+export X402_EVM_ADDRESS=0xYourWalletAddress
+export X402_VERIFY_MODE=basic
+export X402_TESTNET=true
+
+# 2. Run test server (Hono on :3001, Express on :3002)
+npx tsx examples/test-hono-server.ts
+npx tsx examples/test-express-server.ts
+
+# 3. Test endpoints
+curl http://localhost:3001/           # Free endpoint → 200
+curl http://localhost:3001/paid       # No payment → 402
+curl -H "x-payment: <base64>" http://localhost:3001/paid  # With payment → 200
+
+# 4. Generate mock payment header
+npx tsx examples/generate-mock-payment.ts 0xYourWalletAddress
+```
+
+The mock payment header passes `basic` verification because it has correct structure, matching recipient, and valid signature format.

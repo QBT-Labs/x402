@@ -581,6 +581,44 @@ src/
 - [x402 Protocol](https://x402.org) — Payment facilitator
 - [MCP SDK](https://github.com/modelcontextprotocol/sdk) — Model Context Protocol
 
+## Testing
+
+### Unit tests (no credentials required)
+
+Runs all mocked tests. No network calls, no wallet needed.
+
+```bash
+npm test
+```
+
+To run only Cardano adapter tests:
+```bash
+npm test -- --testPathPattern=cardano
+```
+
+### Integration & E2E tests (live Cardano mainnet)
+
+Requires a Blockfrost mainnet project ID, a funded wallet seed phrase, and a recipient address.
+
+```bash
+BLOCKFROST_PROJECT_ID=mainnetXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX \
+CARDANO_TEST_SEED="word1 word2 word3 ... word24" \
+CARDANO_MERCHANT_ADDRESS="addr1q..." \
+npm test -- --testPathPattern=cardano
+```
+
+**What runs with credentials:**
+
+| Test file | What it covers |
+|---|---|
+| `cardano.integration.test.ts` | ADA + iUSD live transfers, structural verify, Blockfrost submission |
+| `cardano.e2e.test.ts` | Full HTTP 402 → sign → verify → 200 flow with iUSD |
+| `cardano.insufficient-balance.test.ts` | USDM/USDCx throw clear errors when wallet has zero balance |
+
+**Get a Blockfrost API key:** https://blockfrost.io (free tier available, select Mainnet)
+
+**Get test ADA (Preprod):** https://docs.cardano.org/cardano-testnets/tools/faucet
+
 ## License
 
 MIT © QBT Labs

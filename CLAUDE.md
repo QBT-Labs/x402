@@ -4,10 +4,23 @@
 
 `@qbtlabs/x402` is a multi-chain payment protocol SDK for AI agents, MCP servers, and HTTP APIs. It enables monetisation via the x402 standard (HTTP 402 Payment Required): any tool or endpoint can gate access behind a micropayment, settled on-chain in USDC.
 
-- **Chain status**: Base L2 (EVM) ✅ production | Solana in progress | Cardano planned
+- **Chain status**: Base L2 (EVM) ✅ | Cardano ✅ | Solana in progress
 - **npm**: `@qbtlabs/x402`
 - **Protocol**: x402 v1 — payment is a base64-encoded JSON header sent as `X-PAYMENT` (HTTP) or `paymentSignature` param (MCP)
 - **Currency**: USDC, 6 decimal places (`1_000_000 = $1.00`)
+
+---
+
+## Types
+
+Shared payload interfaces and token constants live in `src/types/`:
+
+- `evm.types.ts` — `EvmPaymentPayload`, `SignEIP3009Options`, `SignEIP3009Result`
+- `solana.types.ts` — `SolanaPaymentPayload`
+- `cardano.types.ts` — `CardanoPaymentPayload`, `CardanoToken`, `KnownToken`, policy IDs + asset hex for all supported tokens
+- `index.ts` — re-exports all three
+
+Chain adapters in `src/chains/` import from `../types/` rather than defining types inline.
 
 ---
 
@@ -16,18 +29,16 @@
 Every chain adapter lives in `src/chains/{chain}.ts` and must export:
 
 ```typescript
-// Payload interface — the signed proof-of-payment
-export interface {Chain}PaymentPayload {
-  // chain-specific fields
-}
+// Payload interface — in src/types/{chain}.types.ts
+export interface {Chain}PaymentPayload { ... }
 
-// Server-side: validate that a payload is legitimate and covers the price
+// Server-side: validate the payload covers the price
 export async function verifyPayment(
   payment: {Chain}PaymentPayload,
   expectedAmount: number         // USD, e.g. 0.001
 ): Promise<{ valid: boolean; error?: string }>
 
-// Client-side: sign a payment (if implementing full client support)
+// Client-side: sign a payment
 export async function sign{Chain}(...): Promise<...>
 ```
 
@@ -36,7 +47,7 @@ export async function sign{Chain}(...): Promise<...>
 ```typescript
 if (network.startsWith('eip155:'))  → verifyEvmPayment()
 if (network.startsWith('solana:'))  → verifySolanaPayment()
-if (network.startsWith('cardano:')) → not yet implemented
+if (network.startsWith('cardano:')) → verifyCardanoPayment()
 ```
 
 `buildPaymentRequirements()` in `pricing.ts` reads `getActiveChains()` from `config.ts`, which is populated by `configure()`. Adding a new chain requires touching all three.
@@ -68,6 +79,41 @@ if (network.startsWith('cardano:')) → not yet implemented
 - Reads `payment.accepted.network` prefix
 - Calls chain-specific verifier
 - Returns `{ valid, error?, details? }`
+
+---
+
+## Cardano adapter
+
+`src/chains/cardano.ts` — uses **Lucid Evolution** (`@lucid-evolution/lucid`) loaded lazily to avoid WASM init cost at import time.
+
+**Client-side:**
+- `signCardanoPayment(options)` — builds and signs a Lucid transaction; payload is `{ transaction: "<hex CBOR>" }`
+- `getCardanoWalletBalances(options)` — returns balances for all supported tokens
+
+**Server-side:**
+- `verifyCardanoPayment(payment, expectedAmount)` — deserialises CBOR via CML, inspects outputs; structural only (no chain call)
+- `submitCardanoTx(txCbor, options)` — submits signed CBOR to Blockfrost REST API
+
+**Supported tokens:** ADA, iUSD (Indigo), USDM (Mehen), DJED (COTI/IOG), USDCx (Circle xReserve)
+
+**Wire format:** `X-PAYMENT` header carries a base64-encoded JSON `PaymentPayload` where `payload.transaction` is the signed CBOR hex.
+
+**Network detection:** `addr_test1…` prefix → `cardano:preprod`; otherwise → `cardano:mainnet`.
+
+Token constants (policy IDs, asset name hex) live in `src/types/cardano.types.ts`.
+
+---
+
+## Framework middleware
+
+Beyond the MCP wrapper (`withX402`) and generic HTTP handler (`withX402Server`), two framework-specific adapters are available:
+
+| Import | Middleware | Usage |
+|--------|-----------|-------|
+| `@qbtlabs/x402/express` | `x402Express(options)` | Express route middleware |
+| `@qbtlabs/x402/hono` | `x402Hono(options)` | Hono route middleware |
+
+Both accept `{ price?, tier?, toolName? }`. When `toolName` is provided, pricing is looked up from the registered tool table and settlement fires asynchronously after verification. Note: Hono already works with `withX402Server()` (Web Standard API) — `x402Hono` just provides idiomatic Context API style.
 
 ---
 
@@ -108,9 +154,12 @@ Direct:
 | Package | Purpose |
 |---------|---------|
 | `viem ^2.47.4` | EVM: `privateKeyToAccount`, `signTypedData` (EIP-3009) |
+| `@lucid-evolution/lucid` | Cardano: transaction building + signing |
 | `@noble/curves ^2.0.0` | Low-level elliptic curve crypto |
 | `@noble/hashes ^2.0.0` | Hashing utilities |
 | `@modelcontextprotocol/sdk ^1.12.0` | MCP server/transport types |
+
+Peer/optional deps: `express` (for `x402Express`), `hono` (for `x402Hono`).
 
 `@solana/web3.js` and `@noble/ed25519` are **not** currently in dependencies — the Solana adapter (`src/chains/solana.ts`) is a stub that verifies structure only, no cryptographic proof yet.
 
@@ -144,9 +193,9 @@ Direct:
 | Issue | Topic |
 |-------|-------|
 | QBT-596 | Solana adapter (full cryptographic verification) |
-| QBT-595 | Cardano adapter |
+| QBT-595 | Cardano adapter ✅ |
 | QBT-597 | Docs update |
-| QBT-594 | Express adapter |
+| QBT-594 | Express + Hono adapters ✅ |
 | QBT-598 | MCP Proxy CLI |
 
 ---
@@ -170,4 +219,6 @@ npm run test:coverage
 npm run build               # tsc → dist/
 ```
 
-Tests live in `src/__tests__/`. Use real chain IDs in tests, not mocks of network state (on-chain verification paths not yet implemented anyway — stick to unit tests of payload parsing + amount checks).
+Tests live in `src/__tests__/`. Use real chain IDs in tests, not mocks of network state.
+
+Integration tests that hit Blockfrost (Cardano submission) are gated behind `BLOCKFROST_PROJECT_ID` being set in the environment — they skip automatically if the env var is absent. Unit tests for payload parsing and amount checks run unconditionally.

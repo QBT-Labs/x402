@@ -250,22 +250,4 @@ Tests live in `src/__tests__/`. Use real chain IDs in tests, not mocks of networ
 
 Integration tests that hit Blockfrost (Cardano submission) are gated behind `BLOCKFROST_PROJECT_ID` being set in the environment — they skip automatically if the env var is absent. Unit tests for payload parsing and amount checks run unconditionally.
 
-### Live E2E Testing (Hono / Express)
 
-Test the middleware locally without real payments:
-
-```bash
-# 1. Set environment
-export X402_EVM_ADDRESS=0xYourWalletAddress
-export X402_VERIFY_MODE=basic
-export X402_TESTNET=true
-
-# 2. Test with curl
-# No payment → 402 with payment requirements
-curl http://localhost:3001/paid
-
-# With mock payment → 200 (basic mode only)
-curl -H "x-payment: <base64_payment_header>" http://localhost:3001/paid
-```
-
-A mock payment header passes `basic` verification when it has correct structure, matching recipient, sufficient amount, and valid signature format (132 chars starting with `0x`).

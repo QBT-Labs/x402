@@ -4,7 +4,7 @@
 
 `@qbtlabs/x402` is a multi-chain payment protocol SDK for AI agents, MCP servers, and HTTP APIs. It enables monetisation via the x402 standard (HTTP 402 Payment Required): any tool or endpoint can gate access behind a micropayment, settled on-chain in USDC.
 
-- **Chain status**: Base L2 (EVM) ✅ | Cardano ✅ | Solana in progress
+- **Chain status**: Base L2 (EVM) ✅ | Cardano ✅ | Solana ✅
 - **npm**: `@qbtlabs/x402`
 - **Protocol**: x402 v1 — payment is a base64-encoded JSON header sent as `X-PAYMENT` (HTTP) or `paymentSignature` param (MCP)
 - **Currency**: USDC, 6 decimal places (`1_000_000 = $1.00`)
@@ -104,6 +104,41 @@ Token constants (policy IDs, asset name hex) live in `src/types/cardano.types.ts
 
 ---
 
+## Solana adapter
+
+`src/chains/solana.ts` — uses **@solana/web3.js** and **@solana/spl-token** for transaction building.
+
+**Architecture:** Unlike EVM (EIP-3009 signature-only), Solana uses **Partially Signed Transactions (PST)**:
+1. Client builds a `VersionedTransaction` with the facilitator as fee payer
+2. Client partially signs (only their signature)
+3. Server verifies structure, returns 200
+4. Facilitator co-signs as fee payer and submits to network
+
+**Client-side:**
+- `signSolanaPayment(options)` — builds PST with 4 instructions: `[ComputeLimit, ComputePrice, TransferChecked, Memo]`
+- Fee payer is the facilitator — client doesn't need SOL for gas
+
+**Server-side:**
+- `verifyPayment(payment, expectedAmount, network)` — deserializes PST, validates instruction layout and amounts; structural only (no network call)
+
+**Instruction layout (strict order per x402 spec):**
+| Index | Instruction | Purpose |
+|-------|-------------|---------|
+| 0 | `SetComputeUnitLimit` | Compute budget |
+| 1 | `SetComputeUnitPrice` | Priority fee (≤5M microlamports) |
+| 2 | `TransferChecked` | USDC transfer |
+| 3 | `Memo` | 16-byte nonce for replay protection |
+
+**Wire format:** `X-PAYMENT` header carries base64-encoded JSON with `payload.transaction` as base64 serialized `VersionedTransaction`.
+
+**Network detection:** `solana:mainnet` or `solana:devnet` from CAIP-2 identifier.
+
+**USDC addresses:**
+- Mainnet: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
+- Devnet: `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+---
+
 ## Framework middleware
 
 Beyond the MCP wrapper (`withX402`) and generic HTTP handler (`withX402Server`), two framework-specific adapters are available:
@@ -174,7 +209,7 @@ Direct:
 
 Peer/optional deps: `express` (for `x402Express`), `hono` (for `x402Hono`).
 
-`@solana/web3.js` and `@noble/ed25519` are **not** currently in dependencies — the Solana adapter (`src/chains/solana.ts`) is a stub that verifies structure only, no cryptographic proof yet.
+`@solana/web3.js` and `@solana/spl-token` are now included for full Solana PST support.
 
 ---
 

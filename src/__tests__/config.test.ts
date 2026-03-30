@@ -70,14 +70,14 @@ describe('x402 Config', () => {
       process.env.X402_SOLANA_ADDRESS = 'SoLAddressHere123456789012345678901234567890';
       delete process.env.X402_TESTNET;
       const chains = getActiveChains();
-      expect(chains).toContain('solana:mainnet');
+      expect(chains).toContain('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
     });
 
     it('returns Solana devnet when testnet mode', () => {
       process.env.X402_SOLANA_ADDRESS = 'SoLAddressHere123456789012345678901234567890';
       process.env.X402_TESTNET = 'true';
       const chains = getActiveChains();
-      expect(chains).toContain('solana:devnet');
+      expect(chains).toContain('solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1');
     });
 
     it('returns Cardano preprod when testnet mode', () => {
@@ -153,7 +153,7 @@ describe('x402 Pricing', () => {
       const requirements = buildPaymentRequirements(0.001);
       expect(requirements.accepts).toHaveLength(2);
       expect(requirements.accepts.map((a) => a.network)).toContain('eip155:8453');
-      expect(requirements.accepts.map((a) => a.network)).toContain('solana:mainnet');
+      expect(requirements.accepts.map((a) => a.network)).toContain('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
     });
 
     it('correctly converts micro-units', () => {

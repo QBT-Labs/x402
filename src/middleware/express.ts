@@ -63,6 +63,14 @@ function buildRequirementsForPrice(priceUsd: number): {
     else if (chain.startsWith('cardano:')) payTo = cfg.cardano?.address ?? '';
     if (!payTo) continue;
 
+    // Build extra field based on chain type
+    let extra: Record<string, unknown> | undefined;
+    if (chain.startsWith('eip155:')) {
+      extra = { name: chain === 'eip155:84532' ? 'USDC' : 'USD Coin', version: '2' };
+    } else if (chain.startsWith('solana:')) {
+      extra = { feePayer: '2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4', description: 'x402 payment' };
+    }
+
     accepts.push({
       scheme: 'exact',
       network: chain,
@@ -70,9 +78,7 @@ function buildRequirementsForPrice(priceUsd: number): {
       amount: amountMicro,
       maxTimeoutSeconds: 300,
       payTo,
-      ...(chain.startsWith('eip155:') ? {
-        extra: { name: chain === 'eip155:84532' ? 'USDC' : 'USD Coin', version: '2' },
-      } : {}),
+      extra,
     });
   }
 
@@ -90,7 +96,11 @@ function buildRequirementsForPrice(priceUsd: number): {
  */
 export function x402Express(options: ExpressX402Options = {}) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    console.log('[x402] Middleware invoked, options:', JSON.stringify(options));
+    console.log('[x402] isEnabled:', isEnabled());
+    
     if (!isEnabled()) {
+      console.log('[x402] Not enabled, skipping');
       return next();
     }
 
@@ -108,9 +118,11 @@ export function x402Express(options: ExpressX402Options = {}) {
     const paymentHeader = req.headers['x-payment'] as string | undefined;
 
     if (!paymentHeader) {
+      console.log('[x402] toolName:', options.toolName);
       const requirements = options.toolName
         ? buildFacilitatorRequirements(options.toolName)
         : buildRequirementsForPrice(pricing.price);
+      console.log('[x402] requirements:', JSON.stringify(requirements.accepts[0]?.network));
 
       res.status(402).json({
         error: 'Payment Required',
@@ -136,7 +148,16 @@ export function x402Express(options: ExpressX402Options = {}) {
     }
 
     if (options.toolName) {
-      settleWithFacilitator(payment, options.toolName).catch(console.error);
+      console.log(`[x402] Starting settlement for ${options.toolName}...`);
+      settleWithFacilitator(payment, options.toolName)
+        .then((result) => {
+          if (result.success) {
+            console.log(`[x402] Settlement successful: ${result.txHash ?? 'no tx hash'}`);
+          } else {
+            console.error(`[x402] Settlement failed: ${result.error}`);
+          }
+        })
+        .catch((err) => console.error(`[x402] Settlement error:`, err));
     }
 
     return next();

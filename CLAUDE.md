@@ -212,6 +212,32 @@ Peer/optional deps: `express` (for `x402Express`), `hono` (for `x402Hono`).
 
 ---
 
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `X402_EVM_ADDRESS` | Yes* | Your EVM wallet address (receives USDC). If not set, middleware is disabled and passes all requests through. |
+| `X402_SOLANA_ADDRESS` | No | Your Solana wallet address |
+| `X402_CARDANO_ADDRESS` | No | Your Cardano wallet address |
+| `X402_TESTNET` | No | `true` = Base Sepolia. Default = Base mainnet. |
+| `X402_VERIFY_MODE` | No | `basic` (default) or `full`. Basic = structure + recipient + amount check, no on-chain verification. |
+| `BLOCKFROST_PROJECT_ID` | For Cardano | Blockfrost mainnet project ID for Cardano submission/verification |
+
+*At least one address (EVM/Solana/Cardano) is required to enable x402 payment checks.
+
+---
+
+## Verify Modes
+
+| Mode | Checks | Use Case |
+|------|--------|----------|
+| `basic` | Structure valid, recipient matches, amount sufficient, signature format valid (132 chars) | Local testing, development |
+| `full` | All of basic + cryptographic signature verification on-chain | Production |
+
+In `basic` mode, a properly formatted mock payment header will pass verification without real on-chain settlement.
+
+---
+
 ## Testing
 
 ```bash
@@ -223,3 +249,5 @@ npm run build               # tsc → dist/
 Tests live in `src/__tests__/`. Use real chain IDs in tests, not mocks of network state.
 
 Integration tests that hit Blockfrost (Cardano submission) are gated behind `BLOCKFROST_PROJECT_ID` being set in the environment — they skip automatically if the env var is absent. Unit tests for payload parsing and amount checks run unconditionally.
+
+

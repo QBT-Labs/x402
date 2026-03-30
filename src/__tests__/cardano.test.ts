@@ -97,6 +97,7 @@ const {
   verifyCardanoPayment,
   submitCardanoTx,
   getCardanoWalletBalances,
+  getTokenUnit,
   detectNetwork,
   IUSD_POLICY_ID,
   USDM_POLICY_ID,
@@ -135,9 +136,9 @@ beforeEach(() => {
   mockGetUtxos.mockResolvedValue([{
     assets: {
       lovelace: 100_000_000n,
-      [`${IUSD_POLICY_ID}69555344`]:                      100_000_000n,
-      [`${USDM_POLICY_ID}${USDM_ASSET_HEX}`]:             100_000_000n,
-      [`${DJED_POLICY_ID}${DJED_ASSET_HEX}`]:             100_000_000n,
+      [`${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`]: 100_000_000n,
+      [`${USDM_POLICY_ID}${USDM_ASSET_HEX}`]:                      100_000_000n,
+      [`${DJED_POLICY_ID}${DJED_ASSET_HEX}`]:                      100_000_000n,
     },
   }]);
 });
@@ -428,6 +429,28 @@ describe('submitCardanoTx', () => {
 // Unit-conversion helpers
 // ---------------------------------------------------------------------------
 
+describe('getTokenUnit', () => {
+  it('ADA → "lovelace"', () => {
+    expect(getTokenUnit('ADA')).toBe('lovelace');
+  });
+
+  it('iUSD → policyId + hex("iUSD")', () => {
+    const expected = `${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`;
+    expect(getTokenUnit('iUSD')).toBe(expected);
+    expect(getTokenUnit('iUSD')).toBe(
+      'f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b6988069555344',
+    );
+  });
+
+  it('USDM → policyId + USDM_ASSET_HEX', () => {
+    expect(getTokenUnit('USDM')).toBe(`${USDM_POLICY_ID}${USDM_ASSET_HEX}`);
+  });
+
+  it('DJED → policyId + DJED_ASSET_HEX', () => {
+    expect(getTokenUnit('DJED')).toBe(`${DJED_POLICY_ID}${DJED_ASSET_HEX}`);
+  });
+});
+
 describe('unit conversion helpers', () => {
   it('IUSD_DECIMALS is 6', () => {
     expect(IUSD_DECIMALS).toBe(6);
@@ -471,7 +494,7 @@ describe('signCardanoPayment balance check', () => {
 
   it('throws a clear error when iUSD balance is insufficient', async () => {
     // wallet has only 5_000 iUSD units, but 10_000 are required
-    const iUSDUnit = `${IUSD_POLICY_ID}69555344`;
+    const iUSDUnit = `${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`;
     mockGetUtxos.mockResolvedValueOnce([
       { assets: { lovelace: 100_000_000n, [iUSDUnit]: 5_000n } },
     ]);
@@ -493,7 +516,7 @@ describe('signCardanoPayment balance check', () => {
 // ---------------------------------------------------------------------------
 
 describe('getCardanoWalletBalances', () => {
-  const iUSDUnit = `${IUSD_POLICY_ID}69555344`;
+  const iUSDUnit = `${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`;
 
   it('returns lovelace and known-token balances aggregated across UTxOs', async () => {
     mockGetUtxos.mockResolvedValueOnce([

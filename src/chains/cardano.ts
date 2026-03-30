@@ -15,7 +15,7 @@
  *
  * Supported tokens:
  *   - ADA   (native)
- *   - iUSD  (Indigo Protocol, policy: f66d78b4a3cb3d37afa0ec36461e51ecbbd728f7a95aea88de7d7f12)
+ *   - iUSD  (Indigo Protocol, policy: f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880)
  *   - USDM  (Mehen/Moneta fiat-backed, policy: c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad)
  *   - DJED  (COTI/IOG overcollateralised, policy: 8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61)
  *   - USDCx (Circle xReserve, policy: 1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e34)
@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 
 /** iUSD — Indigo Protocol synthetic USD */
-export const IUSD_POLICY_ID = 'f66d78b4a3cb3d37afa0ec36461e51ecbbd728f7a95aea88de7d7f12';
+export const IUSD_POLICY_ID = 'f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880';
 // fromText('iUSD') = hex('iUSD') = 69555344
 const IUSD_ASSET_HEX = '69555344';
 
@@ -135,10 +135,20 @@ function blockfrostUrlForNetwork(network: 'Mainnet' | 'Preprod'): string {
     : 'https://cardano-preprod.blockfrost.io/api/v0';
 }
 
-/** Returns the Lucid unit string (policy_id + asset_name_hex) for a token */
-function tokenUnit(token: Exclude<CardanoToken, 'ADA'>): string {
+/**
+ * Returns the Lucid/Blockfrost unit string for a token.
+ *
+ * Format: `policyId (56 hex chars) + assetNameHex`.
+ * ADA uses the special key `'lovelace'`.
+ *
+ * iUSD uses `Buffer.from('iUSD').toString('hex')` rather than a hardcoded
+ * constant so the encoding is verifiable at a glance. All other tokens use
+ * their pre-verified ASSET_HEX constants.
+ */
+export function getTokenUnit(token: CardanoToken): string {
   switch (token) {
-    case 'iUSD':  return `${IUSD_POLICY_ID}${IUSD_ASSET_HEX}`;
+    case 'ADA':   return 'lovelace';
+    case 'iUSD':  return `${IUSD_POLICY_ID}${Buffer.from('iUSD').toString('hex')}`;
     case 'USDM':  return `${USDM_POLICY_ID}${USDM_ASSET_HEX}`;
     case 'DJED':  return `${DJED_POLICY_ID}${DJED_ASSET_HEX}`;
     case 'USDCx': return `${USDCX_POLICY_ID}${USDCX_ASSET_HEX}`;
@@ -207,20 +217,25 @@ export async function signCardanoPayment(
   lucid.selectWallet.fromSeed(seed);
 
   // ── Balance check — throw a clear error before Lucid produces a cryptic one ──
+  // Accumulate all UTxO assets first (IndigoProtocol pattern), then look up.
   const utxos = await lucid.wallet().getUtxos();
+  const balances: Record<string, bigint> = {};
+  for (const utxo of utxos) {
+    for (const [unit, qty] of Object.entries(utxo.assets)) {
+      balances[unit] = (balances[unit] ?? 0n) + qty;
+    }
+  }
+
+  const unit      = getTokenUnit(token);
+  const available = balances[unit] ?? 0n;
   if (token === 'ADA') {
-    const availableLovelace = utxos.reduce(
-      (sum, u) => sum + (u.assets['lovelace'] ?? 0n), 0n,
-    );
     const required = amount + 500_000n; // 0.5 ADA buffer for fees
-    if (availableLovelace < required) {
+    if (available < required) {
       throw new Error(
-        `Insufficient ADA balance: required ${required} lovelace, available ${availableLovelace} lovelace`,
+        `Insufficient ADA balance: required ${required} lovelace, available ${available} lovelace`,
       );
     }
   } else {
-    const unit      = tokenUnit(token);
-    const available = utxos.reduce((sum, u) => sum + (u.assets[unit] ?? 0n), 0n);
     if (available < amount) {
       throw new Error(
         `Insufficient ${token} balance: required ${amount} units, available ${available} units`,
@@ -236,7 +251,7 @@ export async function signCardanoPayment(
     // Native-token payments must also carry min-ADA for UTxO viability
     assets = {
       lovelace: MIN_ADA_LOVELACE,
-      [tokenUnit(token)]: amount,
+      [getTokenUnit(token)]: amount,
     };
   }
 
@@ -304,7 +319,7 @@ export async function verifyCardanoPayment(
       // Token payment: verify both lovelace min-ADA and native-asset amount
       if (value.coin() < MIN_ADA_LOVELACE) continue;
 
-      const unit         = tokenUnit(token);
+      const unit         = getTokenUnit(token);
       const multiAsset   = value.multi_asset();
       if (!multiAsset) continue;
 
@@ -402,14 +417,21 @@ export async function getCardanoWalletBalances(options: {
 
   const utxos = await lucid.wallet().getUtxos();
 
-  // Aggregate lovelace
-  const totals: Record<string, bigint> = {
-    lovelace: utxos.reduce((sum, u) => sum + (u.assets['lovelace'] ?? 0n), 0n),
-  };
+  // Step 1 — accumulate ALL UTxO assets by unit (IndigoProtocol pattern).
+  // Iterating assets directly avoids any assumption about unit-string format.
+  const raw: Record<string, bigint> = {};
+  for (const utxo of utxos) {
+    for (const [unit, qty] of Object.entries(utxo.assets)) {
+      raw[unit] = (raw[unit] ?? 0n) + qty;
+    }
+  }
 
-  // Aggregate every known stablecoin unit
+  // Step 2 — map to human-readable symbol keys.
+  const totals: Record<string, bigint> = {
+    lovelace: raw['lovelace'] ?? 0n,
+  };
   for (const [unit, token] of Object.entries(KNOWN_CARDANO_TOKENS)) {
-    totals[token.symbol] = utxos.reduce((sum, u) => sum + (u.assets[unit] ?? 0n), 0n);
+    totals[token.symbol] = raw[unit] ?? 0n;
   }
 
   return totals;

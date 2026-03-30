@@ -59,13 +59,16 @@ const mockComplete1   = jest.fn<() => Promise<{ sign: { withWallet: () => unknow
   .mockResolvedValue({ sign: { withWallet: mockWithWallet } });
 const mockPayToAddress = jest.fn().mockReturnValue({ complete: mockComplete1 });
 const mockNewTx        = jest.fn().mockReturnValue({ pay: { ToAddress: mockPayToAddress } });
-const mockFromSeed     = jest.fn();
-const mockAwaitTx      = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+const mockFromSeed  = jest.fn();
+const mockAwaitTx   = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+const mockGetUtxos  = jest.fn<() => Promise<Array<{ assets: Record<string, bigint> }>>>()
+  .mockResolvedValue([{ assets: { lovelace: 100_000_000n } }]);
 
 const mockLucidInstance = {
   newTx: mockNewTx,
   selectWallet: { fromSeed: mockFromSeed },
   awaitTx: mockAwaitTx,
+  wallet: () => ({ getUtxos: mockGetUtxos }),
 };
 const mockLucid      = jest.fn<() => Promise<typeof mockLucidInstance>>()
   .mockResolvedValue(mockLucidInstance);
@@ -93,6 +96,7 @@ const {
   signCardanoPayment,
   verifyCardanoPayment,
   submitCardanoTx,
+  getCardanoWalletBalances,
   detectNetwork,
   IUSD_POLICY_ID,
   USDM_POLICY_ID,
@@ -103,6 +107,9 @@ const {
   USDCX_ASSET_HEX,
   KNOWN_CARDANO_TOKENS,
   MIN_ADA_LOVELACE,
+  IUSD_DECIMALS,
+  iUSDToUnits,
+  usdToCardanoUnits,
 } = await import('../chains/cardano.js');
 
 // ---------------------------------------------------------------------------
@@ -123,6 +130,16 @@ beforeEach(() => {
   mockScriptHashFromHex.mockReturnValue({});
   mockAssetNameFromHex.mockReturnValue({});
   mockAwaitTx.mockResolvedValue(undefined);
+  // Rich default UTxO — enough lovelace and all known stablecoins to pass
+  // the balance check in signCardanoPayment for every existing test case.
+  mockGetUtxos.mockResolvedValue([{
+    assets: {
+      lovelace: 100_000_000n,
+      [`${IUSD_POLICY_ID}69555344`]:                      100_000_000n,
+      [`${USDM_POLICY_ID}${USDM_ASSET_HEX}`]:             100_000_000n,
+      [`${DJED_POLICY_ID}${DJED_ASSET_HEX}`]:             100_000_000n,
+    },
+  }]);
 });
 
 // ---------------------------------------------------------------------------
@@ -404,5 +421,103 @@ describe('submitCardanoTx', () => {
     );
     await submitCardanoTx(MOCK_CBOR, MAINNET_URL, 'proj123');
     expect(mockAwaitTx).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit-conversion helpers
+// ---------------------------------------------------------------------------
+
+describe('unit conversion helpers', () => {
+  it('IUSD_DECIMALS is 6', () => {
+    expect(IUSD_DECIMALS).toBe(6);
+  });
+
+  it('iUSDToUnits(0.01) === 10_000n', () => {
+    expect(iUSDToUnits(0.01)).toBe(10_000n);
+  });
+
+  it('iUSDToUnits(1) === 1_000_000n', () => {
+    expect(iUSDToUnits(1)).toBe(1_000_000n);
+  });
+
+  it('usdToCardanoUnits(0.01, "iUSD") === 10_000n', () => {
+    expect(usdToCardanoUnits(0.01, 'iUSD')).toBe(10_000n);
+  });
+
+  it('usdToCardanoUnits(2, "ADA") === 2_000_000n (lovelace)', () => {
+    expect(usdToCardanoUnits(2, 'ADA')).toBe(2_000_000n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// signCardanoPayment — balance check
+// ---------------------------------------------------------------------------
+
+describe('signCardanoPayment balance check', () => {
+  const BASE = {
+    seed: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+    toAddress: RECIPIENT,
+    blockfrostProjectId: 'mainnetXXXX',
+  };
+
+  it('throws a clear error when ADA balance is insufficient', async () => {
+    // 1 ADA — not enough for 5 ADA + fee buffer
+    mockGetUtxos.mockResolvedValueOnce([{ assets: { lovelace: 1_000_000n } }]);
+    await expect(
+      signCardanoPayment({ ...BASE, amount: 5_000_000n, token: 'ADA' }),
+    ).rejects.toThrow(/Insufficient ADA balance/);
+  });
+
+  it('throws a clear error when iUSD balance is insufficient', async () => {
+    // wallet has only 5_000 iUSD units, but 10_000 are required
+    const iUSDUnit = `${IUSD_POLICY_ID}69555344`;
+    mockGetUtxos.mockResolvedValueOnce([
+      { assets: { lovelace: 100_000_000n, [iUSDUnit]: 5_000n } },
+    ]);
+    await expect(
+      signCardanoPayment({ ...BASE, amount: 10_000n, token: 'iUSD' }),
+    ).rejects.toThrow(/Insufficient iUSD balance/);
+  });
+
+  it('proceeds when balance is sufficient', async () => {
+    // 100 ADA — enough for 2 ADA + fees
+    mockGetUtxos.mockResolvedValueOnce([{ assets: { lovelace: 100_000_000n } }]);
+    const result = await signCardanoPayment({ ...BASE, amount: 2_000_000n, token: 'ADA' });
+    expect(result.transaction).toBe(MOCK_CBOR);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getCardanoWalletBalances
+// ---------------------------------------------------------------------------
+
+describe('getCardanoWalletBalances', () => {
+  const iUSDUnit = `${IUSD_POLICY_ID}69555344`;
+
+  it('returns lovelace and known-token balances aggregated across UTxOs', async () => {
+    mockGetUtxos.mockResolvedValueOnce([
+      { assets: { lovelace: 50_000_000n, [iUSDUnit]: 1_000_000n } },
+      { assets: { lovelace: 30_000_000n } },
+    ]);
+    const balances = await getCardanoWalletBalances({
+      seed: 'test',
+      blockfrostProjectId: 'proj',
+    });
+    expect(balances['lovelace']).toBe(80_000_000n);
+    expect(balances['iUSD']).toBe(1_000_000n);
+    expect(balances['USDM']).toBe(0n);
+    expect(balances['DJED']).toBe(0n);
+    expect(balances['USDCx']).toBe(0n);
+  });
+
+  it('returns all zeros when wallet has no tokens', async () => {
+    mockGetUtxos.mockResolvedValueOnce([{ assets: { lovelace: 5_000_000n } }]);
+    const balances = await getCardanoWalletBalances({
+      seed: 'test',
+      blockfrostProjectId: 'proj',
+    });
+    expect(balances['iUSD']).toBe(0n);
+    expect(balances['USDM']).toBe(0n);
   });
 });

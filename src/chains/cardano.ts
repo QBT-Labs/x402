@@ -97,6 +97,34 @@ export interface CardanoPaymentPayload {
 /** Minimum lovelace that must accompany any native-token UTxO */
 export const MIN_ADA_LOVELACE = 2_000_000n;
 
+/** Decimal places used by iUSD (same as USDC) */
+export const IUSD_DECIMALS = 6;
+
+/**
+ * Convert a human-readable USD amount to iUSD units.
+ * @example iUSDToUnits(0.01) → 10_000n  ($0.01)
+ * @example iUSDToUnits(1)    → 1_000_000n ($1.00)
+ */
+export function iUSDToUnits(usd: number): bigint {
+  return BigInt(Math.round(usd * 10 ** IUSD_DECIMALS));
+}
+
+/**
+ * Convert a USD price to on-chain units for any supported Cardano token.
+ * All supported stablecoins use 6 decimal places; ADA uses lovelace (also 6).
+ * @example usdToCardanoUnits(0.01, 'iUSD') → 10_000n
+ * @example usdToCardanoUnits(2.00, 'ADA')  → 2_000_000n  (lovelace)
+ */
+export function usdToCardanoUnits(priceUsd: number, token: CardanoToken): bigint {
+  if (token === 'ADA') {
+    return BigInt(Math.round(priceUsd * 1_000_000));
+  }
+  // All listed stablecoins use 6 decimal places
+  const knownToken = Object.values(KNOWN_CARDANO_TOKENS).find(t => t.symbol === token);
+  const decimals = knownToken?.decimals ?? 6;
+  return BigInt(Math.round(priceUsd * 10 ** decimals));
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -177,6 +205,28 @@ export async function signCardanoPayment(
     network,
   );
   lucid.selectWallet.fromSeed(seed);
+
+  // ── Balance check — throw a clear error before Lucid produces a cryptic one ──
+  const utxos = await lucid.wallet().getUtxos();
+  if (token === 'ADA') {
+    const availableLovelace = utxos.reduce(
+      (sum, u) => sum + (u.assets['lovelace'] ?? 0n), 0n,
+    );
+    const required = amount + 500_000n; // 0.5 ADA buffer for fees
+    if (availableLovelace < required) {
+      throw new Error(
+        `Insufficient ADA balance: required ${required} lovelace, available ${availableLovelace} lovelace`,
+      );
+    }
+  } else {
+    const unit      = tokenUnit(token);
+    const available = utxos.reduce((sum, u) => sum + (u.assets[unit] ?? 0n), 0n);
+    if (available < amount) {
+      throw new Error(
+        `Insufficient ${token} balance: required ${amount} units, available ${available} units`,
+      );
+    }
+  }
 
   // Build the asset map for the output
   let assets: Record<string, bigint>;
@@ -317,4 +367,50 @@ export async function submitCardanoTx(
   }
 
   return { txHash };
+}
+
+// ---------------------------------------------------------------------------
+// getCardanoWalletBalances — CLIENT SIDE
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the current token balances for a seed-based Cardano wallet.
+ *
+ * Returns a map from human-readable symbol → on-chain units, plus `lovelace`.
+ * Useful for checking which stablecoins the wallet holds before calling
+ * `signCardanoPayment`, enabling multi-token `accepts` logic:
+ *   client calls `getCardanoWalletBalances()` → picks the stablecoin it has
+ *   → builds a payment with `signCardanoPayment()`.
+ *
+ * @example
+ * const balances = await getCardanoWalletBalances({ seed, blockfrostProjectId: 'mainnetXXX' })
+ * // { lovelace: 125000000n, iUSD: 0n, USDM: 500000n, DJED: 0n, USDCx: 0n }
+ */
+export async function getCardanoWalletBalances(options: {
+  seed: string;
+  blockfrostProjectId: string;
+  network?: 'Mainnet' | 'Preprod';
+}): Promise<Record<string, bigint>> {
+  const { seed, blockfrostProjectId, network = 'Mainnet' } = options;
+
+  const { Lucid, Blockfrost } = await import('@lucid-evolution/lucid');
+  const lucid = await Lucid(
+    new Blockfrost(blockfrostUrlForNetwork(network), blockfrostProjectId),
+    network,
+  );
+  lucid.selectWallet.fromSeed(seed);
+
+  const utxos = await lucid.wallet().getUtxos();
+
+  // Aggregate lovelace
+  const totals: Record<string, bigint> = {
+    lovelace: utxos.reduce((sum, u) => sum + (u.assets['lovelace'] ?? 0n), 0n),
+  };
+
+  // Aggregate every known stablecoin unit
+  for (const [unit, token] of Object.entries(KNOWN_CARDANO_TOKENS)) {
+    totals[token.symbol] = utxos.reduce((sum, u) => sum + (u.assets[unit] ?? 0n), 0n);
+  }
+
+  return totals;
 }

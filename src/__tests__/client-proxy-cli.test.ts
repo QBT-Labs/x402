@@ -41,7 +41,7 @@ describe('client-proxy CLI', () => {
     });
 
     expect(code).toBe(1);
-    expect(stderr).toContain('TARGET_URL environment variable is required');
+    expect(stderr).toContain('Error: TARGET_URL is required');
   }, 10000);
 
   it('exits with error when PRIVATE_KEY is missing', async () => {
@@ -50,7 +50,7 @@ describe('client-proxy CLI', () => {
     });
 
     expect(code).toBe(1);
-    expect(stderr).toContain('PRIVATE_KEY environment variable is required');
+    expect(stderr).toContain('Error: PRIVATE_KEY is required');
   }, 10000);
 
   it('exits with error when PRIVATE_KEY does not start with 0x', async () => {

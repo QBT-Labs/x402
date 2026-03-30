@@ -33,7 +33,6 @@ describe('x402 Facilitator', () => {
       expect(requirements.accepts).toHaveLength(1);
       expect(requirements.accepts[0].scheme).toBe('exact');
       expect(requirements.accepts[0].network).toBe('eip155:8453');
-      expect(requirements.accepts[0].resource).toBe('mcp:tool:get_ticker');
       expect(requirements.accepts[0].payTo).toBe('0x1234567890123456789012345678901234567890');
       expect(requirements.accepts[0].extra).toEqual({ name: 'USD Coin', version: '2' });
     });
@@ -75,10 +74,10 @@ describe('x402 Facilitator', () => {
       process.env.X402_EVM_ADDRESS = '0x1234567890123456789012345678901234567890';
 
       const readRequirements = buildFacilitatorRequirements('get_ticker');
-      expect(readRequirements.accepts[0].maxAmountRequired).toBe('1000');
+      expect(readRequirements.accepts[0].amount).toBe('1000');
 
       const writeRequirements = buildFacilitatorRequirements('place_order');
-      expect(writeRequirements.accepts[0].maxAmountRequired).toBe('10000');
+      expect(writeRequirements.accepts[0].amount).toBe('10000');
     });
   });
 

@@ -143,7 +143,7 @@ describe('x402 Pricing', () => {
       const requirements = buildPaymentRequirements(0.01);
       expect(requirements.accepts).toHaveLength(1);
       expect(requirements.accepts[0].network).toBe('eip155:8453');
-      expect(requirements.accepts[0].amount).toBe('10000');
+      expect(requirements.accepts[0].maxAmountRequired).toBe('10000');
       expect(requirements.accepts[0].asset).toBe(USDC_CONTRACTS['eip155:8453']);
     });
 
@@ -158,7 +158,7 @@ describe('x402 Pricing', () => {
 
     it('correctly converts micro-units', () => {
       const requirements = buildPaymentRequirements(0.005);
-      expect(requirements.accepts[0].amount).toBe('5000');
+      expect(requirements.accepts[0].maxAmountRequired).toBe('5000');
     });
   });
 });

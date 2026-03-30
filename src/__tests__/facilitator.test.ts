@@ -44,9 +44,13 @@ describe('x402 Facilitator', () => {
       const requirements = buildFacilitatorRequirements('get_ticker');
 
       expect(requirements.accepts).toHaveLength(1);
-      expect(requirements.accepts[0].network).toBe('solana:mainnet');
+      expect(requirements.accepts[0].network).toBe('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
       expect(requirements.accepts[0].payTo).toBe('SolanaAddress123');
-      expect(requirements.accepts[0].extra).toBeUndefined();
+      // Solana requires fee payer for PST flow
+      expect(requirements.accepts[0].extra).toEqual({
+        feePayer: '2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4',
+        description: 'x402 payment',
+      });
     });
 
     it('builds requirements for both chains when both configured', () => {
@@ -58,7 +62,7 @@ describe('x402 Facilitator', () => {
 
       expect(requirements.accepts).toHaveLength(2);
       expect(requirements.accepts.map((a) => a.network)).toContain('eip155:8453');
-      expect(requirements.accepts.map((a) => a.network)).toContain('solana:mainnet');
+      expect(requirements.accepts.map((a) => a.network)).toContain('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
     });
 
     it('uses testnet chains when testnet mode', () => {

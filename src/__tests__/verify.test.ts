@@ -121,7 +121,7 @@ describe('x402 Verification', () => {
     payload: validSolanaInner,
     accepted: {
       scheme: 'exact',
-      network: 'solana:mainnet',
+      network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
       asset: USDC_MINT.toBase58(),
       amount: '10000',
       payTo: merchantKeypair.publicKey.toBase58(),
@@ -213,14 +213,14 @@ describe('x402 Verification', () => {
   // -------------------------------------------------------------------------
   describe('verifySolanaPayment', () => {
     it('accepts valid PST with sufficient amount', async () => {
-      const result = await verifySolanaPayment(validSolanaInner, 0.01, 'solana:mainnet');
+      const result = await verifySolanaPayment(validSolanaInner, 0.01, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
       expect(result.valid).toBe(true);
     });
 
     it('rejects transaction with insufficient amount', async () => {
       // Build PST with 5000 units ($0.005) and require $0.01
       const smallPayload = buildTestPST(5000n);
-      const result = await verifySolanaPayment(smallPayload, 0.01, 'solana:mainnet');
+      const result = await verifySolanaPayment(smallPayload, 0.01, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('Insufficient');
     });
@@ -229,21 +229,21 @@ describe('x402 Verification', () => {
       // Build PST paying a different merchant
       const wrongMerchant = Keypair.fromSeed(Buffer.alloc(32).fill(0x04)).publicKey;
       const wrongPayload = buildTestPST(10000n, wrongMerchant);
-      const result = await verifySolanaPayment(wrongPayload, 0.01, 'solana:mainnet');
+      const result = await verifySolanaPayment(wrongPayload, 0.01, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('destination ATA');
     });
 
     it('rejects malformed base64 transaction', async () => {
       const badPayload: SolanaPaymentPayload = { transaction: 'not!!valid!!base64' };
-      const result = await verifySolanaPayment(badPayload, 0.01, 'solana:mainnet');
+      const result = await verifySolanaPayment(badPayload, 0.01, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('deserialization');
     });
 
     it('rejects transaction with wrong USDC mint', async () => {
       // Pass devnet network — mint check will fail because tx uses mainnet USDC
-      const result = await verifySolanaPayment(validSolanaInner, 0.01, 'solana:devnet');
+      const result = await verifySolanaPayment(validSolanaInner, 0.01, 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('Wrong mint');
     });

@@ -77,7 +77,7 @@ describe('x402 Middleware', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.accepts).toHaveLength(2);
       expect(response.accepts[0].network).toBe('eip155:8453');
-      expect(response.accepts[1].network).toBe('solana:mainnet');
+      expect(response.accepts[1].network).toBe('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
     });
 
     it('executes handler when valid payment provided', async () => {

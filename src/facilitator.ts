@@ -6,7 +6,7 @@
  */
 
 import type { PaymentPayload } from './verify.js';
-import { getConfig, getActiveChains, USDC_CONTRACTS } from './config.js';
+import { getConfig, getActiveChains, USDC_CONTRACTS, PAYAI_SOLANA_FEE_PAYER } from './config.js';
 import { getToolPrice } from './pricing.js';
 
 
@@ -54,6 +54,21 @@ export function buildFacilitatorRequirements(toolName: string): {
 
     if (!payTo) continue;
 
+    // Build extra field based on chain type
+    let extra: Record<string, unknown> | undefined;
+    if (chain.startsWith('eip155:')) {
+      extra = { 
+        name: chain === 'eip155:84532' ? 'USDC' : 'USD Coin', 
+        version: '2' 
+      };
+    } else if (chain.startsWith('solana:')) {
+      // Solana requires fee payer for PST (Partially Signed Transaction) flow
+      extra = {
+        feePayer: PAYAI_SOLANA_FEE_PAYER,
+        description: 'x402 payment',
+      };
+    }
+
     accepts.push({
       scheme: 'exact',
       network: chain,
@@ -61,10 +76,7 @@ export function buildFacilitatorRequirements(toolName: string): {
       amount: amountMicro,
       maxTimeoutSeconds: 300,
       payTo,
-      extra: chain.startsWith('eip155:') ? { 
-        name: chain === 'eip155:84532' ? 'USDC' : 'USD Coin', 
-        version: '2' 
-      } : undefined,
+      extra,
     });
   }
 
@@ -79,11 +91,15 @@ export async function verifyWithFacilitator(
   toolName: string
 ): Promise<{ valid: boolean; error?: string }> {
   const cfg = getConfig();
-  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org/facilitator';
   const requirements = buildFacilitatorRequirements(toolName);
 
   const acceptedNetwork = payment.accepted?.network;
   const matchingRequirement = requirements.accepts.find((r) => r.network === acceptedNetwork);
+
+  // Use PayAI facilitator for Solana, Coinbase for EVM
+  const facilitatorUrl = acceptedNetwork?.startsWith('solana:')
+    ? (cfg.solanaFacilitatorUrl ?? 'https://facilitator.payai.network')
+    : (cfg.facilitatorUrl ?? 'https://x402.org/facilitator');
 
   if (!matchingRequirement) {
     return { valid: false, error: `Unsupported network: ${acceptedNetwork}` };
@@ -132,7 +148,6 @@ export async function settleWithFacilitator(
   toolName: string
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   const cfg = getConfig();
-  const facilitatorUrl = cfg.facilitatorUrl ?? 'https://x402.org/facilitator';
   const requirements = buildFacilitatorRequirements(toolName);
 
   const acceptedNetwork = payment.accepted?.network;
@@ -141,6 +156,11 @@ export async function settleWithFacilitator(
   if (!matchingRequirement) {
     return { success: false, error: `Unsupported network: ${acceptedNetwork}` };
   }
+
+  // Use PayAI facilitator for Solana, Coinbase for EVM
+  const facilitatorUrl = acceptedNetwork?.startsWith('solana:')
+    ? (cfg.solanaFacilitatorUrl ?? 'https://facilitator.payai.network')
+    : (cfg.facilitatorUrl ?? 'https://x402.org/facilitator');
 
   try {
     const response = await fetch(`${facilitatorUrl}/settle`, {

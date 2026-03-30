@@ -14,6 +14,7 @@ export interface X402Config {
   testnet?: boolean;
   verifyMode?: 'basic' | 'full';
   facilitatorUrl?: string;
+  solanaFacilitatorUrl?: string;
 }
 
 let config: X402Config = {};
@@ -50,6 +51,7 @@ export function getConfig(): X402Config {
     testnet: config.testnet ?? process.env.X402_TESTNET === 'true',
     verifyMode: config.verifyMode ?? (process.env.X402_VERIFY_MODE as 'basic' | 'full') ?? 'basic',
     facilitatorUrl: config.facilitatorUrl ?? process.env.X402_FACILITATOR_URL ?? 'https://x402.org/facilitator',
+    solanaFacilitatorUrl: config.solanaFacilitatorUrl ?? process.env.X402_SOLANA_FACILITATOR_URL ?? 'https://facilitator.payai.network',
   };
 }
 
@@ -74,7 +76,8 @@ export function getActiveChains(): string[] {
   }
   
   if (cfg.solana?.address) {
-    chains.push(cfg.testnet ? 'solana:devnet' : 'solana:mainnet');
+    // Use CAIP-2 format for Solana (required by PayAI facilitator)
+    chains.push(cfg.testnet ? 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1' : 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
   }
   
   if (cfg.cardano?.address) {
@@ -90,6 +93,24 @@ export function getActiveChains(): string[] {
 export const USDC_CONTRACTS: Record<string, string> = {
   'eip155:8453': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
   'eip155:84532': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  // Solana CAIP-2 format
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  // mainnet
+  'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',  // devnet
+  // Legacy format (for backwards compatibility)
   'solana:mainnet': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   'solana:devnet': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
 };
+
+/**
+ * Solana CAIP-2 network identifiers
+ */
+export const SOLANA_NETWORKS = {
+  mainnet: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+  devnet: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
+} as const;
+
+/**
+ * PayAI facilitator fee payer for Solana
+ * This is fetched dynamically but cached for performance
+ */
+export const PAYAI_SOLANA_FEE_PAYER = '2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4';

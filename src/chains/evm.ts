@@ -1,22 +1,13 @@
 /**
  * EVM Chain Support (Base, Ethereum, Arbitrum, etc.)
- * 
+ *
  * Implements EIP-3009 TransferWithAuthorization verification
  */
 
 import { getConfig, USDC_CONTRACTS } from '../config.js';
 
-export interface EvmPaymentPayload {
-  authorization: {
-    from: string;
-    to: string;
-    value: string;
-    validAfter: string;
-    validBefore: string;
-    nonce: string;
-  };
-  signature: string;
-}
+export type { EvmPaymentPayload, SignEIP3009Options, SignEIP3009Result } from '../types/evm.types.js';
+import type { EvmPaymentPayload, SignEIP3009Options, SignEIP3009Result } from '../types/evm.types.js';
 
 /**
  * Verify EVM payment signature.
@@ -88,11 +79,9 @@ function verifyBasic(
  * Get USDC contract address for a given chain
  */
 export function getUsdcAddress(chainId: string): string | undefined {
-  // Try direct lookup first (e.g., "eip155:8453")
   if (USDC_CONTRACTS[chainId]) {
     return USDC_CONTRACTS[chainId];
   }
-  // Try with eip155 prefix (e.g., "8453" -> "eip155:8453")
   const eipChainId = `eip155:${chainId}`;
   return USDC_CONTRACTS[eipChainId];
 }
@@ -111,49 +100,24 @@ const EIP3009_TYPES = {
   ],
 } as const;
 
-export interface SignEIP3009Options {
-  privateKey: string;
-  to: string;
-  value: bigint;
-  validAfter: number;
-  validBefore: number;
-  nonce?: bigint;
-  chainId: number;
-}
-
 /**
  * Sign an EIP-3009 TransferWithAuthorization message
  */
-export interface SignEIP3009Result {
-  signature: string;
-  authorization: {
-    from: string;
-    to: string;
-    value: string;
-    validAfter: string;
-    validBefore: string;
-    nonce: string;
-  };
-}
-
 export async function signEIP3009(options: SignEIP3009Options): Promise<SignEIP3009Result> {
   const { privateKeyToAccount } = await import('viem/accounts');
   const { randomBytes } = await import('crypto');
-  
+
   const account = privateKeyToAccount(options.privateKey as `0x${string}`);
-  
-  // Generate nonce if not provided
-  const nonce = options.nonce 
+
+  const nonce = options.nonce
     ? `0x${options.nonce.toString(16).padStart(64, '0')}`
     : `0x${randomBytes(32).toString('hex')}`;
-  
-  // Get USDC contract address for the chain
+
   const usdcAddress = getUsdcAddress(options.chainId.toString());
   if (!usdcAddress) {
     throw new Error(`Unknown chain ID: ${options.chainId}`);
   }
-  
-  // Build the domain
+
   // Base Sepolia USDC uses domain name "USDC"; mainnet uses "USD Coin"
   const domainName = options.chainId === 84532 ? 'USDC' : 'USD Coin';
   const domain = {
@@ -162,8 +126,7 @@ export async function signEIP3009(options: SignEIP3009Options): Promise<SignEIP3
     chainId: options.chainId,
     verifyingContract: usdcAddress as `0x${string}`,
   };
-  
-  // Build the message
+
   const message = {
     from: account.address,
     to: options.to as `0x${string}`,
@@ -172,15 +135,14 @@ export async function signEIP3009(options: SignEIP3009Options): Promise<SignEIP3
     validBefore: BigInt(options.validBefore),
     nonce: nonce as `0x${string}`,
   };
-  
-  // Sign the typed data
+
   const signature = await account.signTypedData({
     domain,
     types: EIP3009_TYPES,
     primaryType: 'TransferWithAuthorization',
     message,
   });
-  
+
   return {
     signature,
     authorization: {

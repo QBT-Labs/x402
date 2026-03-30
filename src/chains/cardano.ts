@@ -6,7 +6,7 @@
  * Server-side verification deserialises the CBOR via CML, inspects outputs, and
  * optionally submits via Blockfrost REST API.
  *
- * Supported tokens: ADA, iUSD, USDM, DJED, USDCx — see cardano.types.ts.
+ * Supported tokens: ADA, iUSD, USDM, DJED, USDCx — see src/types/cardano.types.ts.
  */
 
 // @lucid-evolution/lucid is loaded lazily inside async functions so that
@@ -28,7 +28,7 @@ export {
   type CardanoToken,
   type CardanoPaymentPayload,
   type KnownToken,
-} from './cardano.types.js';
+} from '../types/cardano.types.js';
 
 import {
   IUSD_POLICY_ID,
@@ -43,7 +43,7 @@ import {
   KNOWN_CARDANO_TOKENS,
   type CardanoToken,
   type CardanoPaymentPayload,
-} from './cardano.types.js';
+} from '../types/cardano.types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

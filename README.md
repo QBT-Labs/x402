@@ -1,10 +1,18 @@
 # @qbtlabs/x402
 
-Multi-chain payment protocol for AI agents. Enable pay-per-call monetization for MCP servers with automatic USDC micropayments on Base.
+Multi-chain payment protocol for AI agents. Enable pay-per-call monetization for MCP servers with automatic stablecoin micropayments across EVM, Solana, and Cardano.
 
 [![npm version](https://img.shields.io/npm/v/@qbtlabs/x402.svg)](https://www.npmjs.com/package/@qbtlabs/x402)
 [![npm downloads](https://img.shields.io/npm/dm/@qbtlabs/x402.svg)](https://www.npmjs.com/package/@qbtlabs/x402)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Supported Chains
+
+| Chain | Token(s) | Pattern | Network |
+|-------|----------|---------|---------|
+| **Base (EVM)** | USDC | EIP-3009 (gasless) | Mainnet / Sepolia |
+| **Solana** | USDC | PST (gasless via facilitator) | Mainnet / Devnet |
+| **Cardano** | ADA, iUSD, USDM, DJED, USDCx | Signed tx via Lucid | Mainnet / Preprod |
 
 ## Architecture
 
@@ -230,8 +238,10 @@ x402 policy audit
 - **Client Proxy** — Automatic payment signing via stdio transport
 - **Server Middleware** — Payment gating with zero tool-level changes
 - **Payment-Aware Fetch** — Drop-in replacement for `fetch()` with payment handling
-- **Multi-Chain** — Base (USDC) with Solana support planned
-- **Testnet Ready** — Base Sepolia for development
+- **Multi-Chain** — Base (EVM), Solana, and Cardano with unified API
+- **Gasless Payments** — Users don't need native tokens for gas (EVM via EIP-3009, Solana via facilitator fee payer)
+- **Multi-Token (Cardano)** — Accept ADA or stablecoins: iUSD, USDM, DJED, USDCx
+- **Testnet Ready** — Base Sepolia, Solana Devnet, Cardano Preprod
 
 ## Installation
 
@@ -356,9 +366,11 @@ const response = await paymentFetch('https://mcp.openmm.io/mcp', {
 ```typescript
 import { withX402Server, setToolPrices, configure } from '@qbtlabs/x402';
 
-// Configure payment recipient
+// Configure payment recipients (multi-chain)
 configure({
   evm: { address: process.env.X402_EVM_ADDRESS },
+  solana: { address: process.env.X402_SOLANA_ADDRESS },
+  cardano: { address: process.env.X402_CARDANO_ADDRESS },
   testnet: process.env.X402_TESTNET === 'true',
 });
 
@@ -387,8 +399,8 @@ export default {
 
 The middleware automatically:
 - Passes free tools and non-tool requests through
-- Returns 402 with payment requirements for paid tools
-- Verifies payments via the facilitator
+- Returns 402 with payment requirements for all configured chains
+- Verifies payments via the appropriate facilitator (x402.org for EVM, PayAI for Solana)
 - Settles payments after successful execution
 
 ## API Reference
@@ -396,15 +408,21 @@ The middleware automatically:
 ### Configuration
 
 ```typescript
-import { configure, setToolPrices } from '@qbtlabs/x402';
+import { configure, setToolPrices, getActiveChains } from '@qbtlabs/x402';
 
-// Configure payment settings
+// Configure payment settings (multi-chain)
 configure({
-  evm: { address: '0x...' },        // Your USDC receiving address
-  solana: { address: 'So...' },     // Optional: Solana address
-  testnet: true,                     // Use Base Sepolia
-  facilitatorUrl: 'https://x402.org', // Default facilitator
+  evm: { address: '0x...' },             // Base USDC receiving address
+  solana: { address: 'So...' },          // Solana USDC receiving address
+  cardano: { address: 'addr1q...' },     // Cardano receiving address
+  testnet: true,                          // Use testnets (Sepolia, Devnet, Preprod)
+  facilitatorUrl: 'https://x402.org',    // EVM facilitator
+  solanaFacilitatorUrl: 'https://facilitator.payai.network', // Solana facilitator
 });
+
+// Check which chains are configured
+const chains = getActiveChains();
+// ['eip155:84532', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'cardano:preprod']
 
 // Set pricing for tools
 setToolPrices({
@@ -517,19 +535,108 @@ const result = await verifyWithFacilitator(paymentPayload, 'get_ticker');
 await settleWithFacilitator(paymentPayload, 'get_ticker');
 ```
 
+### Solana Adapter
+
+The Solana adapter uses a **Partially Signed Transaction (PST)** pattern. The user signs a transfer, and the facilitator adds its signature as fee payer — making payments **gasless** for the user.
+
+```typescript
+import { solana } from '@qbtlabs/x402';
+
+// Client: Sign a USDC payment (gasless — facilitator pays SOL fees)
+const payload = await solana.signSolanaPayment({
+  privateKey: keypair.secretKey,        // 64-byte Solana keypair
+  to: 'MerchantPubkey...',              // USDC recipient
+  amount: 0.01,                          // USD amount
+  network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',  // mainnet
+  feePayer: '2wKupLR9q6wXYppw...',      // facilitator fee payer (from 402 response)
+});
+
+// Server: Verify payment structure (no network calls)
+const result = await solana.verifyPayment(
+  payload,
+  0.01,                                  // expected USD amount
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+);
+// { valid: true, payer: 'ClientPubkey...' }
+```
+
+**Instruction layout** (strict order per x402 spec):
+1. `SetComputeUnitLimit` — compute budget
+2. `SetComputeUnitPrice` — priority fee (≤5M microlamports)
+3. `TransferChecked` — USDC transfer
+4. `Memo` — 16-byte nonce for replay protection
+
+### Cardano Adapter
+
+The Cardano adapter uses **Lucid Evolution** for client-side transaction building and **CML** for server-side verification. Supports ADA and multiple stablecoins.
+
+```typescript
+import { cardano } from '@qbtlabs/x402';
+
+// Client: Sign a payment (iUSD example)
+const payload = await cardano.signCardanoPayment({
+  seed: 'word1 word2 ... word24',       // BIP-39 mnemonic
+  toAddress: 'addr1q...',               // merchant address
+  amount: 10_000n,                       // 0.01 iUSD (6 decimals)
+  token: 'iUSD',                         // ADA | iUSD | USDM | DJED | USDCx
+  blockfrostProjectId: 'mainnetXXX',
+  network: 'Mainnet',                    // or 'Preprod'
+});
+// { transaction: 'hex-cbor-signed-tx' }
+
+// Server: Verify payment structure
+const result = await cardano.verifyCardanoPayment(
+  payload,
+  'addr1q...',                           // expected recipient
+  10_000n,                               // expected amount
+  'iUSD',                                // expected token
+);
+// { valid: true }
+
+// Settlement: Submit via Blockfrost
+const { txHash } = await cardano.submitCardanoTx(
+  payload.transaction,
+  'https://cardano-mainnet.blockfrost.io/api/v0',
+  'mainnetXXX',
+);
+```
+
+**Helper utilities:**
+
+```typescript
+// Convert USD to token units
+cardano.usdToCardanoUnits(0.01, 'iUSD');  // → 10_000n
+cardano.usdToCardanoUnits(2.00, 'ADA');   // → 2_000_000n (lovelace)
+
+// Get wallet balances (useful for multi-token acceptance)
+const balances = await cardano.getCardanoWalletBalances({
+  seed: 'word1 ...',
+  blockfrostProjectId: 'mainnetXXX',
+});
+// { lovelace: 125000000n, iUSD: 50000n, USDM: 0n, DJED: 0n, USDCx: 0n }
+
+// Detect network from address
+cardano.detectNetwork('addr1q...');       // → 'cardano'
+cardano.detectNetwork('addr_test1...');   // → 'cardano-preprod'
+```
+
 ## Package Structure
 
 ```
 src/
 ├── index.ts              # Main exports
-├── config.ts             # Configuration (addresses, testnet)
+├── config.ts             # Configuration (addresses, testnet, chain detection)
 ├── pricing.ts            # Tool pricing tiers
 ├── verify.ts             # Payment verification
-├── client.ts             # Client-side signing
+├── client.ts             # Client-side signing (EVM)
 ├── facilitator.ts        # x402.org integration
 ├── chains/
-│   ├── evm.ts            # EVM/Base utilities
-│   └── solana.ts         # Solana utilities (planned)
+│   ├── index.ts          # Chain module exports
+│   ├── evm.ts            # EVM/Base: EIP-3009 gasless transfers
+│   ├── solana.ts         # Solana: PST pattern, USDC, gasless via facilitator
+│   └── cardano.ts        # Cardano: Lucid/CML, ADA + stablecoins
+├── types/
+│   └── cardano.types.ts  # Cardano token registry & types
 ├── transport/
 │   ├── payment-fetch.ts  # Payment-aware fetch
 │   └── server.ts         # Server middleware
@@ -548,16 +655,21 @@ src/
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `X402_PRIVATE_KEY` | Wallet private key for signing payments | Yes |
-| `X402_CHAIN_ID` | Chain ID (84532=Sepolia, 8453=Mainnet) | No (default: 84532) |
+| `X402_PRIVATE_KEY` | EVM wallet private key for signing payments | For EVM |
+| `X402_CHAIN_ID` | EVM Chain ID (84532=Sepolia, 8453=Mainnet) | No (default: 84532) |
+| `BLOCKFROST_PROJECT_ID` | Blockfrost API key for Cardano | For Cardano |
+| `CARDANO_SEED` | BIP-39 mnemonic (24 words) for Cardano wallet | For Cardano |
 
 ### Server Side
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `X402_EVM_ADDRESS` | USDC receiving wallet address | Yes |
-| `X402_TESTNET` | Use testnet (Base Sepolia) | No (default: false) |
-| `X402_FACILITATOR_URL` | Custom facilitator URL | No |
+| `X402_EVM_ADDRESS` | EVM USDC receiving wallet address | For EVM |
+| `X402_SOLANA_ADDRESS` | Solana USDC receiving wallet address | For Solana |
+| `X402_CARDANO_ADDRESS` | Cardano receiving address (bech32) | For Cardano |
+| `X402_TESTNET` | Use testnets (Sepolia, Devnet, Preprod) | No (default: false) |
+| `X402_FACILITATOR_URL` | Custom EVM facilitator URL | No |
+| `X402_SOLANA_FACILITATOR_URL` | Custom Solana facilitator URL | No (default: PayAI) |
 
 ## Pricing Tiers
 
@@ -570,10 +682,35 @@ src/
 
 ## Networks
 
+### EVM (Base)
+
 | Network | Chain ID | USDC Contract |
 |---------|----------|---------------|
 | Base Sepolia | 84532 | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | Base Mainnet | 8453 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+
+### Solana
+
+| Network | CAIP-2 Identifier | USDC Mint |
+|---------|-------------------|-----------|
+| Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
+| Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` |
+
+### Cardano
+
+| Network | Identifier | Supported Tokens |
+|---------|------------|------------------|
+| Mainnet | `cardano:mainnet` | ADA, iUSD, USDM, DJED, USDCx |
+| Preprod | `cardano:preprod` | ADA, iUSD, USDM, DJED, USDCx |
+
+**Cardano Stablecoins:**
+
+| Token | Description | Policy ID |
+|-------|-------------|-----------|
+| iUSD | Indigo Protocol synthetic USD | `f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880` |
+| USDM | Mehen fiat-backed stablecoin | `c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad` |
+| DJED | COTI/IOG overcollateralised USD | `8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61` |
+| USDCx | Circle xReserve USDC-backed | `1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e34` |
 
 ## Related Projects
 

@@ -6,7 +6,8 @@
 
 import { isEnabled } from '../config.js';
 import { getToolPrice, buildPaymentRequirements } from '../pricing.js';
-import { parsePaymentHeader, verifyPayment } from '../verify.js';
+import { parsePaymentHeader } from '../verify.js';
+import { processPayment, verifyWithFacilitator } from '../facilitator.js';
 
 type ToolResult = { content: Array<{ type: string; text: string }> };
 type ToolHandler<T = unknown> = (params: T) => Promise<ToolResult>;
@@ -85,12 +86,16 @@ export function withX402<T extends ParamsWithPayment>(
       return paymentError(toolName, 'Invalid payment signature format');
     }
 
-    const result = await verifyPayment(payment, pricing.price);
-    if (!result.valid) {
+    const result = await processPayment(payment, toolName, () => handler(params));
+    if (!result.success) {
       return paymentError(toolName, result.error ?? 'Unknown error');
     }
 
-    return handler(params);
+    if (result.txHash) {
+      process.stderr.write(`[x402] settled on-chain: ${result.txHash}\n`);
+    }
+
+    return result.result!;
   };
 }
 
@@ -121,7 +126,7 @@ export async function checkPayment(
     return paymentError(toolName, 'Invalid payment signature format');
   }
 
-  const result = await verifyPayment(payment, pricing.price);
+  const result = await verifyWithFacilitator(payment, toolName);
   if (!result.valid) {
     return paymentError(toolName, result.error ?? 'Unknown error');
   }

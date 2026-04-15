@@ -50,87 +50,100 @@ export function createSplitClient(options: SplitClientOptions): SplitClient {
   // In testnet or when skipJwtVerification is set, we can skip JWT verification
   const shouldSkipJwtVerification = skipJwtVerification || testnet;
 
-  return {
-    async requestJWT({ exchange, tool }) {
-      const url = `${workerUrl}/verify-payment`;
-      const body = JSON.stringify({ exchange, tool });
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // Serialize payment requests to avoid facilitator nonce collisions when
+  // multiple tool calls fire in parallel (e.g. split execution across exchanges).
+  let paymentQueue: Promise<unknown> = Promise.resolve();
 
-      // Step 1: Initial request — expect 402 with payment requirements
-      const initialRes = await fetch(url, { method: 'POST', headers, body });
+  async function doRequestJWT({ exchange, tool }: { exchange: string; tool: string }): Promise<{ jwt: string }> {
+    const url = `${workerUrl}/verify-payment`;
+    const body = JSON.stringify({ exchange, tool });
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-      if (initialRes.ok) {
-        const data = await initialRes.json() as { jwt?: string };
-        if (data.jwt) return { jwt: data.jwt };
-        throw new Error('Worker returned 200 but no JWT');
-      }
+    // Step 1: Initial request — expect 402 with payment requirements
+    const initialRes = await fetch(url, { method: 'POST', headers, body });
 
-      if (initialRes.status !== 402) {
-        const text = await initialRes.text();
-        throw new Error(`Unexpected response from Worker (${initialRes.status}): ${text}`);
-      }
+    if (initialRes.ok) {
+      const data = await initialRes.json() as { jwt?: string };
+      if (data.jwt) return { jwt: data.jwt };
+      throw new Error('Worker returned 200 but no JWT');
+    }
 
-      // Step 2: Parse 402 requirements
-      const requirementsBody = await initialRes.json() as {
-        accepts?: PaymentRequirements[];
-      } & PaymentRequirements;
-      const accepts: PaymentRequirements[] = requirementsBody.accepts ?? [requirementsBody];
-      const req = accepts[0];
-      if (!req) throw new Error('No payment requirements in 402 response');
+    if (initialRes.status !== 402) {
+      const text = await initialRes.text();
+      throw new Error(`Unexpected response from Worker (${initialRes.status}): ${text}`);
+    }
 
-      // Step 3: Sign EIP-3009 using x402 core client OR isolated signer
-      const payTo = req.payTo as `0x${string}`;
-      // Support both V2 (amount) and V1 (maxAmountRequired) field names
-      const amountStr = req.amount || req.maxAmountRequired;
-      if (!amountStr) throw new Error('No amount in payment requirements');
-      const amount = parseInt(amountStr) / 1_000_000;
-      const amountWei = amountStr;
-      const reqChainId = req.extra?.chainId ?? chainId;
+    // Step 2: Parse 402 requirements
+    const requirementsBody = await initialRes.json() as {
+      accepts?: PaymentRequirements[];
+    } & PaymentRequirements;
+    const accepts: PaymentRequirements[] = requirementsBody.accepts ?? [requirementsBody];
+    const req = accepts[0];
+    if (!req) throw new Error('No payment requirements in 402 response');
 
-      let paymentHeader: string;
+    // Step 3: Sign EIP-3009 using x402 core client OR isolated signer
+    const payTo = req.payTo as `0x${string}`;
+    // Support both V2 (amount) and V1 (maxAmountRequired) field names
+    const amountStr = req.amount || req.maxAmountRequired;
+    if (!amountStr) throw new Error('No amount in payment requirements');
+    const amount = parseInt(amountStr) / 1_000_000;
+    const amountWei = amountStr;
+    const reqChainId = req.extra?.chainId ?? chainId;
 
-      if (signer) {
-        // Use isolated signer (key never leaves signer process)
-        const signResult = await signer.sign({
-          to: payTo,
-          amount: amountWei,
-          chainId: reqChainId,
-        });
-        
-        // Build payment payload with exact authorization data from signer
-        paymentHeader = buildPaymentPayloadWithAuthorization({
-          signature: signResult.signature,
-          authorization: signResult.authorization,
-          chainId: reqChainId,
-        });
-      } else {
-        // Use direct private key (legacy mode)
-        const signed = await signPayment({
-          privateKey: privateKey!,
-          to: payTo,
-          amount,
-          chainId: reqChainId,
-          validForSeconds: 300,
-        });
-        paymentHeader = buildPaymentPayload(signed);
-      }
+    let paymentHeader: string;
 
-      // Step 4: Retry with X-PAYMENT header → get JWT
-      const paidRes = await fetch(url, {
-        method: 'POST',
-        headers: { ...headers, 'X-PAYMENT': paymentHeader },
-        body,
+    if (signer) {
+      // Use isolated signer (key never leaves signer process)
+      const signResult = await signer.sign({
+        to: payTo,
+        amount: amountWei,
+        chainId: reqChainId,
       });
 
-      if (!paidRes.ok) {
-        const text = await paidRes.text();
-        throw new Error(`Payment failed (${paidRes.status}): ${text}`);
-      }
+      // Build payment payload with exact authorization data from signer
+      paymentHeader = buildPaymentPayloadWithAuthorization({
+        signature: signResult.signature,
+        authorization: signResult.authorization,
+        chainId: reqChainId,
+      });
+    } else {
+      // Use direct private key (legacy mode)
+      const signed = await signPayment({
+        privateKey: privateKey!,
+        to: payTo,
+        amount,
+        chainId: reqChainId,
+        validForSeconds: 300,
+      });
+      paymentHeader = buildPaymentPayload(signed);
+    }
 
-      const data = await paidRes.json() as { jwt?: string };
-      if (!data.jwt) throw new Error('Worker accepted payment but returned no JWT');
+    // Step 4: Retry with X-PAYMENT header → get JWT
+    const paidRes = await fetch(url, {
+      method: 'POST',
+      headers: { ...headers, 'X-PAYMENT': paymentHeader },
+      body,
+    });
 
-      return { jwt: data.jwt };
+    if (!paidRes.ok) {
+      const text = await paidRes.text();
+      throw new Error(`Payment failed (${paidRes.status}): ${text}`);
+    }
+
+    const data = await paidRes.json() as { jwt?: string };
+    if (!data.jwt) throw new Error('Worker accepted payment but returned no JWT');
+
+    return { jwt: data.jwt };
+  }
+
+  return {
+    requestJWT({ exchange, tool }) {
+      // Chain onto the previous request so payments execute one at a time,
+      // preventing facilitator on-chain nonce collisions under parallel calls.
+      const result = paymentQueue.then(() => doRequestJWT({ exchange, tool }));
+      // Update the tail — swallow errors so the queue doesn't stall on failure.
+      paymentQueue = result.catch(() => undefined);
+      return result;
     },
 
     async verifyJWT(token: string): Promise<JWTClaims> {

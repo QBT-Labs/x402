@@ -171,11 +171,18 @@ export class SignerServer {
     }
 
     if (policyResult.requiresApproval) {
-      // TODO: Implement approval flow
+      this.policy.recordTransaction({
+        id,
+        timestamp: new Date().toISOString(),
+        to: payload.to,
+        amount: payload.amount,
+        chainId: payload.chainId,
+        status: 'pending',
+      });
       return {
         id,
         success: false,
-        error: 'Transaction requires manual approval (not yet implemented)',
+        error: `Transaction requires manual approval: to=${payload.to} amount=${payload.amount} chainId=${payload.chainId}`,
       };
     }
 

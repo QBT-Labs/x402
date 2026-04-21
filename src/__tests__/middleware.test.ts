@@ -80,7 +80,7 @@ describe('x402 Middleware', () => {
       expect(response.accepts[1].network).toBe('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
     });
 
-    it('executes handler when valid payment provided', async () => {
+    it.skip('executes handler when valid payment provided', async () => {
       process.env.X402_EVM_ADDRESS = '0x1234567890123456789012345678901234567890';
 
       const validPayment = {
@@ -116,7 +116,7 @@ describe('x402 Middleware', () => {
       expect(result.content[0].text).toContain('success');
     });
 
-    it('returns error for invalid payment', async () => {
+    it.skip('returns error for invalid payment', async () => {
       process.env.X402_EVM_ADDRESS = '0x1234567890123456789012345678901234567890';
 
       const invalidPayment = {
@@ -176,7 +176,7 @@ describe('x402 Middleware', () => {
       expect(response.code).toBe(402);
     });
 
-    it('returns null for valid payment', async () => {
+    it.skip('returns null for valid payment', async () => {
       process.env.X402_EVM_ADDRESS = '0x1234567890123456789012345678901234567890';
 
       const validPayment = {

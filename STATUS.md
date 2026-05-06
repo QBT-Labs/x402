@@ -1,26 +1,22 @@
-# x402 Status
+# Repository Status
 
-## Version 0.4.1
-- Released: 2026-04-17
-- Payment Protocol: Multi-chain (EVM Base, Solana, Cardano)
-- MCP Support: 1.27.1 compatible
+## Last Verification
+- **Date**: 2026-05-06
+- **Test Suite**: 16 test suites passed, 220 tests passed, 18 skipped (integration)
+- **Coverage**: EVM (Base), Solana, Cardano adapters — all operational
+- **Status**: ✅ Operational
 
-## Supported Chains
-- **Base (EVM)**: USDC via EIP-3009 (gasless)
-- **Solana**: USDC via PST (facilitator-based)
-- **Cardano**: ADA, iUSD, USDM, DJED, USDCx
+## Recent Changes
+- Cardano adapter with Lucid Evolution integration complete
+- Solana PST (Partially Signed Transaction) support added
+- EVM EIP-3009 gasless signatures functional
+- All chain modules pure functions (Workers/Deno compatible)
 
-## Security Layers
-1. Encrypted Vault (AES-256-GCM)
-2. Process Isolation (signer in isolated process)
-3. Policy Engine (resource limits)
-4. KMS Integration (AWS KMS for production)
+## Chains Status
+- ✅ Base (EVM) — mainnet + Sepolia
+- ✅ Solana — mainnet + devnet
+- ✅ Cardano — mainnet + preprod (ADA, iUSD, USDM, DJED, USDCx)
 
-## Integration Status
-- OpenMM-MCP: ✓ Active integration
-- StratForge: ✓ Available for payments
-- Error handling: ✓ Production-ready (serialization fix in 0.4.1)
-
-## Last Check
-2026-04-29 — All tests passing (16 test suites, 220 tests). Payment serialization stable. StratForge integration active, autoresearch in progress (sharpe 2.331662).
-Tue Apr 29 18:15:00 EEST 2026: status check
+## Next Steps
+- Monitor x402.org facilitator integration
+- Continue Cardano open standard documentation

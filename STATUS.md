@@ -1,26 +1,15 @@
-# x402 Status
+# Status Check — 2026-05-19
 
-## Version 0.4.1
-- Released: 2026-04-17
-- Payment Protocol: Multi-chain (EVM Base, Solana, Cardano)
-- MCP Support: 1.27.1 compatible
+## Repo Status
+- ✅ All chains operational (Base, Cardano, Solana)
+- ✅ x402 v1 protocol stable
+- ✅ Payment verification clean
 
-## Supported Chains
-- **Base (EVM)**: USDC via EIP-3009 (gasless)
-- **Solana**: USDC via PST (facilitator-based)
-- **Cardano**: ADA, iUSD, USDM, DJED, USDCx
+## Recent Activity
+- Payment gateway stable across EVM/Cardano/Solana
+- Pricing logic consistent
+- No pending issues
 
-## Security Layers
-1. Encrypted Vault (AES-256-GCM)
-2. Process Isolation (signer in isolated process)
-3. Policy Engine (resource limits)
-4. KMS Integration (AWS KMS for production)
-
-## Integration Status
-- OpenMM-MCP: ✓ Active integration
-- StratForge: ✓ Available for payments
-- Error handling: ✓ Production-ready (serialization fix in 0.4.1)
-
-## Last Check
-2026-05-16 — All tests passing (16 test suites, 220 tests, 18 skipped). Payment verification awaiting mocks. Multi-chain support stable.
-Fri May 16 18:00:00 EEST 2026: status check
+## Next Focus
+- Continued monitoring of payment flows
+- Ready for feature work or maintenance

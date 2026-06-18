@@ -1,0 +1,220 @@
+---
+title: Monetize MCP Servers and APIs with QBT x402
+description: Add per-request stablecoin payments to any MCP tool, API route, or AI agent using HTTP 402. No subscriptions, no API-key billing, no custom payment backend.
+sidebar_position: 1
+---
+
+# Monetize MCP Servers and APIs with QBT x402
+
+Add per-request stablecoin payments to any MCP tool, API route, or AI agent using HTTP 402. No subscriptions, no API-key billing, no custom payment backend.
+
+```bash
+npm install @qbtlabs/x402
+```
+
+---
+
+## 1. What you can monetize
+
+| You have… | x402 gives you |
+|---|---|
+| An **MCP server** with tools | Per-tool pricing, automatic 402 responses, settlement |
+| A **REST or RPC API** | Route-level payment middleware (Express, Hono, Cloudflare Workers) |
+| An **agent** that calls paid tools | A drop-in `fetch` that signs and retries on 402 |
+| A **premium endpoint** inside an existing app | One wrapper, no other code changes |
+
+Anything you can put behind HTTP can be priced per call in USDC.
+
+---
+
+## 2. How it works
+
+The x402 protocol is a clean handshake on top of HTTP:
+
+```
+Agent ──▶ tool/api request
+          │
+          ◀── 402 Payment Required + accepted chains/assets
+          │
+Agent ──▶ retry with X-PAYMENT header (signed)
+          │
+Server ──▶ verify + settle via facilitator
+          │
+          ◀── 200 OK + result
+```
+
+No tokens to issue. No webhooks to wire up. The payment receipt is a confirmed on-chain USDC transfer.
+
+---
+
+## 3. Two integration paths
+
+### A. Add payments to your own server
+
+This is the path you want if you control the server code. Three primitives — `configure`, `setToolPrices`, `withX402Server`:
+
+```typescript
+import { configure, setToolPrices, withX402Server } from '@qbtlabs/x402';
+
+configure({
+  evm: { address: process.env.X402_EVM_ADDRESS },
+  testnet: true,
+});
+
+setToolPrices({
+  list_tools: 'free',
+  get_ticker: 'read',       // $0.001
+  run_analysis: 'analysis', // $0.005
+  place_order: 'write',     // $0.01
+  premium_signal: 0.25,     // custom USD
+});
+
+export default {
+  fetch: withX402Server({
+    handler: async (request) => {
+      return Response.json({ ok: true });
+    },
+  }),
+};
+```
+
+Framework-specific adapters wrap the same logic with idiomatic ergonomics:
+
+```typescript
+// Express
+import express from 'express';
+import { x402Express } from '@qbtlabs/x402/express';
+
+const app = express();
+app.get('/quote', x402Express({ tier: 'read' }), (req, res) => {
+  res.json({ price: 42 });
+});
+```
+
+```typescript
+// Hono (works on Cloudflare Workers, Bun, Deno, Node)
+import { Hono } from 'hono';
+import { x402Hono } from '@qbtlabs/x402/hono';
+
+const app = new Hono();
+app.get('/quote', x402Hono({ tier: 'read' }), (c) => c.json({ price: 42 }));
+```
+
+### B. Monetize an existing MCP server without changing its code
+
+> **Coming soon.** Tracked in [QBT-598](https://linear.app/qbtlabs) — `x402-mcp-proxy` CLI.
+
+The intent: stand a paywall in front of any upstream MCP server with a single command, no source-code access required.
+
+```bash
+# Coming soon
+npx @qbtlabs/x402-mcp-proxy \
+  --upstream "npx your-existing-mcp-server" \
+  --recipient 0xYourWallet \
+  --price 0.01
+```
+
+Until that ships, the same outcome is achievable today with `withX402Server` in front of an HTTP-transported MCP server.
+
+---
+
+## 4. Pricing model
+
+Tiers are intentionally short — three numbers cover almost every API. Pass any value as a custom override.
+
+| Tier | Default USD | Typical use |
+|---|---|---|
+| `free` | $0.000 | Discovery, listings, `tools/list` |
+| `read` | $0.001 | Market data, queries, lookups |
+| `analysis` | $0.005 | Computed insights, model inference |
+| `write` | $0.010 | Mutations, transactions, side effects |
+
+```typescript
+setToolPrices({
+  list_tools: 'free',
+  get_ticker: 'read',
+  run_analysis: 'analysis',
+  place_order: 'write',
+  custom_tool: 0.25, // USD — bypass tiers when you need to
+});
+```
+
+Amounts are converted to USDC micro-units (`1_000_000 = $1.00`) at request time.
+
+---
+
+## 5. Client experience
+
+x402 is symmetric — the same SDK that monetizes a server also lets an agent pay for one. Two flavors:
+
+### Drop-in proxy for MCP clients
+
+Add one entry to your MCP client config and your AI agent will pay for tools automatically. Works with Claude Code, Claude Desktop, Cursor, Windsurf, and any MCP-compatible client.
+
+```json
+{
+  "mcpServers": {
+    "paid-server": {
+      "command": "npx",
+      "args": [
+        "@qbtlabs/x402",
+        "client-proxy",
+        "--target",
+        "https://your-api.com/mcp"
+      ],
+      "env": {
+        "X402_PRIVATE_KEY": "0xYOUR_PRIVATE_KEY"
+      }
+    }
+  }
+}
+```
+
+### Programmatic `fetch`
+
+```typescript
+import { createPaymentFetch } from '@qbtlabs/x402';
+
+const paymentFetch = createPaymentFetch({
+  privateKey: process.env.X402_PRIVATE_KEY,
+  chainId: 84532, // Base Sepolia
+});
+
+const res = await paymentFetch('https://your-api.com/quote');
+```
+
+Spending limits, allowlists, and audit logging are enforced by the local **policy engine** (`x402 policy …`) — see the security docs.
+
+---
+
+## 6. Supported chains
+
+| Chain | Status | Token(s) | Settlement path |
+|---|---|---|---|
+| **Base (EVM)** | **Available** — primary | USDC | EIP-3009 gasless, settled by `x402.org` facilitator |
+| **Solana** | **Available** — via PayAI today, QBT facilitator coming | USDC | Partially Signed Transaction (PST), facilitator pays SOL fees |
+| **Cardano** | **Available** — self-settled via Blockfrost today, QBT facilitator coming | ADA, iUSD, USDM, DJED, USDCx | Lucid Evolution signed transaction, submitted via Blockfrost |
+
+All three chains share the same client API (`createPaymentFetch`, MCP proxy) and the same server API (`withX402Server`, `x402Express`, `x402Hono`). Pick which receivers to enable in `configure({ evm, solana, cardano })`.
+
+---
+
+## 7. Why QBT x402
+
+- **MCP-first.** Built around the way agents actually call tools, not retrofitted from a generic billing API.
+- **Multi-client proxy.** Same config snippet works in Claude Code, Claude Desktop, Cursor, Windsurf, and any stdio MCP client.
+- **Server middleware for the runtimes you already use.** Cloudflare Workers, Express, Hono, raw Node — one wrapper each.
+- **Multi-chain by default.** Base today; Solana and Cardano sharing the same surface, no rewrite required to switch.
+- **Security architecture for autonomous agents.** Encrypted vault, isolated signer process, policy engine with spending limits and audit log — keys never touch the agent process.
+- **Self-settle or use a facilitator.** Point at `x402.org`, PayAI, your own facilitator, or Blockfrost (Cardano).
+- **Transparent per-call settlement.** Every paid call is a confirmed on-chain USDC transfer. No invoices to reconcile.
+
+---
+
+## Next steps
+
+- **Server quickstart**: 5-minute MCP setup → `/quickstarts/mcp`
+- **API quickstart**: Express → `/quickstarts/express` · Hono / Workers → `/quickstarts/hono`
+- **Client quickstart**: Claude Code → `/quickstarts/claude-code`
+- **Reference**: [`@qbtlabs/x402` on npm](https://www.npmjs.com/package/@qbtlabs/x402)
+- **Source**: [github.com/QBT-Labs/x402](https://github.com/QBT-Labs/x402)

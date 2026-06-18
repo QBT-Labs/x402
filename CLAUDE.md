@@ -230,7 +230,7 @@ Peer/optional deps: `express` (for `x402Express`), `hono` (for `x402Hono`).
 
 - Branch naming: `feat/qbt-{issue-number}-{short-description}`
 - Commit style: `feat(qbt-NNN): short description`
-- **Never** include "Claude" or "Co-Authored-By: Claude" in any commit message
+- **Never** include "Claude", "Co-Authored-By: Claude", "Generated with Claude", or any other AI-attribution string in **commit messages, commit trailers, PR titles, or PR descriptions**. This applies to every git artifact and every GitHub artifact — no exceptions. If a commit slips through with an attribution line, rewrite it (`git commit --amend` or `git rebase -i`) and force-push the cleaned history before opening or updating a PR.
 - **Never** commit `.env`, private keys, or secrets
 - Keep chain modules free of Node.js-only APIs
 

@@ -257,4 +257,22 @@ describe('createPaymentFetch', () => {
 
     expect(onPaymentSent).toHaveBeenCalledWith('https://api.example.com/url-input', 0.001);
   });
+
+  it('reads x402 v2 requirements from the PAYMENT-REQUIRED header and sends PAYMENT-SIGNATURE too', async () => {
+    const v2 = { x402Version: 2, error: 'X-PAYMENT header required', accepts: [{ network: 'eip155:8453', amount: '1080424', payTo: '0xRecipientAddress1234567890123456789012' }] };
+    const res402 = makeResponse(402, { x402Version: 2, error: 'X-PAYMENT header required' });
+    (res402 as any).headers = new Headers({ 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(v2)).toString('base64') });
+    mockFetch.mockResolvedValueOnce(res402).mockResolvedValueOnce(makeResponse(200, { ok: true }));
+    mockParsePaymentRequired.mockReturnValue({ ...makeParsedRequirements(), amountAtomic: '1080424' });
+    mockSignPayment.mockResolvedValue(makeSignedPayment());
+    mockBuildPaymentPayload.mockReturnValue('base64-payment-header');
+
+    const res = await createPaymentFetch({ privateKey: PRIVATE_KEY })('https://api.example.com/v2');
+    expect(res.status).toBe(200);
+    expect(mockParsePaymentRequired).toHaveBeenCalledWith(v2);
+    expect((mockSignPayment.mock.calls.at(-1)?.[0] as any).amountAtomic).toBe('1080424');
+    const headers = (mockFetch.mock.calls[1][1] as RequestInit).headers as Headers;
+    expect(headers.get('X-PAYMENT')).toBe('base64-payment-header');
+    expect(headers.get('PAYMENT-SIGNATURE')).toBe('base64-payment-header');
+  });
 });

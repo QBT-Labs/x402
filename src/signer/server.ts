@@ -18,12 +18,14 @@ export class SignerServer {
   private socketPath: string;
   private password: string;
   private isRunning = false;
+  private preSign?: SignerConfig['preSign'];
 
   constructor(config: SignerConfig & { password: string }) {
     this.socketPath = config.socketPath || DEFAULT_SOCKET_PATH;
     this.password = config.password;
     this.vault = new Vault({ vaultPath: config.vaultPath });
     this.policy = new PolicyEngine(config.policyPath);
+    this.preSign = config.preSign;
 
     if (!this.vault.exists()) {
       throw new Error('Vault not found. Run "x402 vault init" first.');
@@ -183,6 +185,25 @@ export class SignerServer {
         id,
         success: false,
         error: `Transaction requires manual approval: to=${payload.to} amount=${payload.amount} chainId=${payload.chainId}`,
+      };
+    }
+
+    // Optional extra pre-sign check (e.g. an independent verdict), still BEFORE decrypting the key
+    if (this.preSign) {
+      let gate;
+      try {
+        gate = await this.preSign({ ...payload, from: this.vault.getAddress() });
+      } catch (error) {
+        return { id, success: false, error: `Pre-sign check failed: ${(error as Error).message}` };
+      }
+      if (!gate.allowed) {
+        return { id, success: false, error: `Pre-sign check refused: ${gate.reason ?? 'no reason given'}` };
+      }
+      payload = {
+        ...payload,
+        ...(gate.nonce !== undefined ? { nonce: gate.nonce } : {}),
+        ...(gate.validAfter !== undefined ? { validAfter: gate.validAfter } : {}),
+        ...(gate.validBefore !== undefined ? { validBefore: gate.validBefore } : {}),
       };
     }
 

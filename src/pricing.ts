@@ -3,6 +3,7 @@
  */
 
 import { getConfig, getActiveChains, USDC_CONTRACTS } from './config.js';
+import { usdToAtomic } from './amount.js';
 
 export type PricingTier = 'free' | 'read' | 'analysis' | 'write';
 
@@ -68,7 +69,7 @@ export function buildPaymentRequirements(priceUsd: number): {
   const chains = getActiveChains();
   const accepts: Array<{ network: string; asset: string; maxAmountRequired: string; payTo: string }> = [];
 
-  const maxAmountRequired = Math.ceil(priceUsd * 1_000_000).toString();
+  const maxAmountRequired = usdToAtomic(priceUsd).toString();
 
   for (const chain of chains) {
     const asset = USDC_CONTRACTS[chain];

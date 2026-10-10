@@ -6,6 +6,7 @@ import { verifyPayment as verifyEvmPayment, type EvmPaymentPayload } from './cha
 import { verifyPayment as verifySolanaPayment, type SolanaPaymentPayload } from './chains/solana.js';
 import { verifyCardanoPayment, type CardanoPaymentPayload } from './chains/cardano.js';
 import { getConfig } from './config.js';
+import { usdToAtomic } from './amount.js';
 
 export interface PaymentPayload {
   x402Version: number;
@@ -77,7 +78,7 @@ export async function verifyPayment(
     const result = await verifyCardanoPayment(
       payment.payload as CardanoPaymentPayload,
       cfg.cardano?.address ?? '',
-      BigInt(Math.ceil(expectedAmount * 1_000_000)),
+      usdToAtomic(expectedAmount),
       'ADA',
     );
     return { valid: result.valid, error: result.error };

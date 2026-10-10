@@ -5,6 +5,7 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import { createWalletClient, http } from 'viem';
 import { baseSepolia, base } from 'viem/chains';
+import { usdToAtomic } from './amount.js';
 
 const USDC_CONTRACTS: Record<number, `0x${string}`> = {
   8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Base mainnet
@@ -17,6 +18,8 @@ interface SignPaymentParams {
   amount: number;
   chainId?: number;
   validForSeconds?: number;
+  /** Exact amount in atomic USDC units (6 decimals), e.g. from an x402 v2 `accepts[].amount`. Overrides `amount`. */
+  amountAtomic?: string;
 }
 
 export interface SignedPayment {
@@ -44,6 +47,7 @@ function randomNonce(): `0x${string}` {
  */
 export async function signPayment(params: SignPaymentParams): Promise<SignedPayment> {
   const { privateKey, to, amount, chainId = 84532, validForSeconds = 300 } = params;
+  const exact = params.amountAtomic !== undefined ? BigInt(params.amountAtomic) : undefined;
 
   const account = privateKeyToAccount(privateKey);
   const chain = chainId === 8453 ? base : baseSepolia;
@@ -53,7 +57,7 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
     throw new Error(`Unsupported chain: ${chainId}`);
   }
 
-  const value = BigInt(Math.ceil(amount * 1_000_000));
+  const value = usdToAtomic(amount);
   const validAfter = BigInt(0);
   const validBefore = BigInt(Math.floor(Date.now() / 1000) + validForSeconds);
   const nonce = randomNonce();
@@ -88,7 +92,7 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
     message: {
       from: account.address,
       to,
-      value,
+      value: exact ?? value,
       validAfter,
       validBefore,
       nonce,
@@ -98,7 +102,7 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
   return {
     from: account.address,
     to,
-    value: value.toString(),
+    value: (exact ?? value).toString(),
     validAfter: validAfter.toString(),
     validBefore: validBefore.toString(),
     nonce,
@@ -110,7 +114,25 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
 /**
  * Build payment payload for x402 header
  */
-export function buildPaymentPayload(signedPayment: SignedPayment): string {
+/**
+ * x402 v2 servers match `accepted` against the requirement they offered (maxTimeoutSeconds, extra, ...), so echo
+ * the server's entry when it is for the same payee and amount that was signed; otherwise build the minimal block.
+ */
+function acceptedBlock(
+  fallback: { scheme: string; network: string; asset: string; amount: string; payTo: string },
+  offered?: PaymentRequirementEntry,
+): Record<string, unknown> {
+  if (
+    offered &&
+    String(offered.payTo).toLowerCase() === fallback.payTo.toLowerCase() &&
+    String(offered.amount ?? offered.maxAmountRequired) === fallback.amount
+  ) {
+    return { ...offered };
+  }
+  return fallback;
+}
+
+export function buildPaymentPayload(signedPayment: SignedPayment, offered?: PaymentRequirementEntry): string {
   const asset = signedPayment.network === 'eip155:84532'
     ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
     : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -131,14 +153,10 @@ export function buildPaymentPayload(signedPayment: SignedPayment): string {
       },
       signature: signedPayment.signature,
     },
-    // Also include accepted for compatibility
-    accepted: {
-      scheme: 'exact',
-      network: signedPayment.network,
-      asset,
-      amount: signedPayment.value,
-      payTo: signedPayment.to,
-    },
+    accepted: acceptedBlock(
+      { scheme: 'exact', network: signedPayment.network, asset, amount: signedPayment.value, payTo: signedPayment.to },
+      offered,
+    ),
   };
   return Buffer.from(JSON.stringify(payload)).toString('base64');
 }
@@ -204,6 +222,8 @@ export function buildPaymentPayloadWithAuthorization(params: {
     nonce: string;
   };
   chainId: number;
+  /** The requirement entry from the server's 402 (`parsePaymentRequired(...).accepted`); echoed when it matches. */
+  accepted?: PaymentRequirementEntry;
 }): string {
   const { signature, authorization, chainId } = params;
   const network = `eip155:${chainId}`;
@@ -218,41 +238,65 @@ export function buildPaymentPayloadWithAuthorization(params: {
       authorization,
       signature,
     },
-    accepted: {
-      scheme: 'exact',
-      network,
-      asset,
-      amount: authorization.value,
-      payTo: authorization.to,
-    },
+    accepted: acceptedBlock(
+      { scheme: 'exact', network, asset, amount: authorization.value, payTo: authorization.to },
+      params.accepted,
+    ),
   };
   return Buffer.from(JSON.stringify(payload)).toString('base64');
 }
 
+/** One entry of an x402 `accepts` list (v1 uses `maxAmountRequired`, v2 uses `amount`). */
+export interface PaymentRequirementEntry {
+  network: string;
+  asset?: string;
+  payTo: string;
+  scheme?: string;
+  amount?: string;
+  maxAmountRequired?: string;
+  [extra: string]: unknown;
+}
+
 /**
- * Parse 402 response and extract payment requirements
+ * Parse a 402 body (or a decoded v2 `PAYMENT-REQUIRED` header) and pick the first requirement this client can pay:
+ * scheme `exact` (or unstated), USDC on Base or Base Sepolia. Accepts x402 v1 (`error: 'Payment Required'`,
+ * `maxAmountRequired`) and v2 (`x402Version: 2`, any error text, `amount`). Returns null when nothing is payable.
  */
 export function parsePaymentRequired(response: {
+  x402Version?: number;
   error?: string;
   price?: number;
-  accepts?: Array<{ network: string; asset: string; payTo: string; maxAmountRequired: string }>;
+  accepts?: PaymentRequirementEntry[];
 }): {
   price: number;
   payTo: string;
   network: string;
   chainId: number;
+  /** Exact amount in atomic USDC units, as the server stated it. */
+  amountAtomic?: string;
+  /** The chosen `accepts` entry, verbatim, to echo back as `accepted` (x402 v2). */
+  accepted: PaymentRequirementEntry;
 } | null {
-  if (response.error !== 'Payment Required' || !response.accepts?.length) {
-    return null;
+  if (!response || !Array.isArray(response.accepts) || !response.accepts.length) return null;
+  if (response.x402Version !== 2 && response.error !== 'Payment Required') return null;
+
+  for (const accept of response.accepts) {
+    if (accept.scheme !== undefined && accept.scheme !== 'exact') continue;
+    const [ns, ref] = String(accept.network ?? '').split(':');
+    const chainId = parseInt(ref || '84532');
+    if (ns !== 'eip155' || !USDC_CONTRACTS[chainId]) continue;
+    if (accept.asset && accept.asset.toLowerCase() !== USDC_CONTRACTS[chainId].toLowerCase()) continue;
+    const raw = accept.amount ?? accept.maxAmountRequired;
+    const amountAtomic = raw !== undefined && /^[0-9]+$/.test(String(raw)) ? String(raw) : undefined;
+    if (amountAtomic === undefined && response.price === undefined) continue;
+    return {
+      price: response.price ?? Number(amountAtomic) / 1_000_000,
+      payTo: accept.payTo,
+      network: accept.network,
+      chainId,
+      ...(amountAtomic !== undefined ? { amountAtomic } : {}),
+      accepted: accept,
+    };
   }
-
-  const accept = response.accepts[0];
-  const chainId = parseInt(accept.network.split(':')[1] || '84532');
-
-  return {
-    price: response.price ?? parseInt(accept.maxAmountRequired) / 1_000_000,
-    payTo: accept.payTo,
-    network: accept.network,
-    chainId,
-  };
+  return null;
 }

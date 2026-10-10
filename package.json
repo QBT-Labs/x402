@@ -57,6 +57,10 @@
     "./policy": {
       "types": "./dist/policy/index.d.ts",
       "import": "./dist/policy/index.js"
+    },
+    "./verdict": {
+      "types": "./dist/verdict/index.d.ts",
+      "import": "./dist/verdict/index.js"
     }
   },
   "bin": {

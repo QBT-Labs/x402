@@ -41,6 +41,7 @@ export type { PricingTier, ToolPricing } from './pricing.js';
 
 // Verification
 export { parsePaymentHeader, verifyPayment } from './verify.js';
+export { usdToAtomic } from './amount.js';
 export type { PaymentPayload } from './verify.js';
 
 // Middleware

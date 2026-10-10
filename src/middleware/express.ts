@@ -15,6 +15,7 @@ import { getToolPrice, DEFAULT_TIERS } from '../pricing.js';
 import type { PricingTier } from '../pricing.js';
 import { parsePaymentHeader, verifyPayment } from '../verify.js';
 import { buildFacilitatorRequirements, settleWithFacilitator } from '../facilitator.js';
+import { usdToAtomic } from '../amount.js';
 
 export interface ExpressX402Options {
   /** Exact price in USD. Ignored when toolName is provided. */
@@ -42,7 +43,7 @@ function buildRequirementsForPrice(priceUsd: number): {
 } {
   const cfg = getConfig();
   const chains = getActiveChains();
-  const amountMicro = Math.ceil(priceUsd * 1_000_000).toString();
+  const amountMicro = usdToAtomic(priceUsd).toString();
   const accepts: Array<{
     scheme: string;
     network: string;

@@ -8,6 +8,7 @@
 import type { PaymentPayload } from './verify.js';
 import { getConfig, getActiveChains, USDC_CONTRACTS, PAYAI_SOLANA_FEE_PAYER } from './config.js';
 import { getToolPrice } from './pricing.js';
+import { usdToAtomic } from './amount.js';
 
 
 /**
@@ -27,7 +28,7 @@ export function buildFacilitatorRequirements(toolName: string): {
   const cfg = getConfig();
   const chains = getActiveChains();
   const pricing = getToolPrice(toolName);
-  const amountMicro = Math.ceil(pricing.price * 1_000_000).toString();
+  const amountMicro = usdToAtomic(pricing.price).toString();
 
   const accepts: Array<{
     scheme: string;

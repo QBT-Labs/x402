@@ -5,6 +5,7 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import { createWalletClient, http } from 'viem';
 import { baseSepolia, base } from 'viem/chains';
+import { usdToAtomic } from './amount.js';
 
 const USDC_CONTRACTS: Record<number, `0x${string}`> = {
   8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Base mainnet
@@ -53,7 +54,7 @@ export async function signPayment(params: SignPaymentParams): Promise<SignedPaym
     throw new Error(`Unsupported chain: ${chainId}`);
   }
 
-  const value = BigInt(Math.ceil(amount * 1_000_000));
+  const value = usdToAtomic(amount);
   const validAfter = BigInt(0);
   const validBefore = BigInt(Math.floor(Date.now() / 1000) + validForSeconds);
   const nonce = randomNonce();

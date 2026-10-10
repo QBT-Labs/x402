@@ -8,6 +8,7 @@ import { getConfig, USDC_CONTRACTS } from '../config.js';
 
 export type { EvmPaymentPayload, SignEIP3009Options, SignEIP3009Result } from '../types/evm.types.js';
 import type { EvmPaymentPayload, SignEIP3009Options, SignEIP3009Result } from '../types/evm.types.js';
+import { usdToAtomic } from '../amount.js';
 
 /**
  * Verify EVM payment signature.
@@ -48,7 +49,7 @@ function verifyBasic(
   }
 
   const paidAmount = BigInt(authorization.value);
-  const requiredAmount = BigInt(Math.ceil(expectedAmount * 1_000_000));
+  const requiredAmount = usdToAtomic(expectedAmount);
 
   if (paidAmount < requiredAmount) {
     return { valid: false, error: `Insufficient: ${paidAmount} < ${requiredAmount}` };

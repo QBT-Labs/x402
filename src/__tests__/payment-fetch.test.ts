@@ -216,10 +216,13 @@ describe('createPaymentFetch', () => {
 
   it('preserves original request init on retry', async () => {
     const retryResponse = makeResponse(200, { data: 'paid' });
-
-    mockFetch
-      .mockResolvedValueOnce(makeResponse(402, make402Body()))
-      .mockResolvedValueOnce(retryResponse);
+    const captured: Array<{ method: string; body: string }> = [];
+    const captureRequest = async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init);
+      captured.push({ method: request.method, body: await request.text() });
+      return captured.length === 1 ? makeResponse(402, make402Body()) : retryResponse;
+    };
+    mockFetch.mockImplementationOnce(captureRequest).mockImplementationOnce(captureRequest);
 
     setupSuccessfulPaymentMocks();
 
@@ -230,10 +233,8 @@ describe('createPaymentFetch', () => {
       body: JSON.stringify({ query: 'test' }),
     });
 
-    const retryCall = mockFetch.mock.calls[1];
-    const retryInit = retryCall[1] as RequestInit;
-    expect(retryInit.method).toBe('POST');
-    expect(retryInit.body).toBe(JSON.stringify({ query: 'test' }));
+    expect(captured[1].method).toBe('POST');
+    expect(captured[1].body).toBe(JSON.stringify({ query: 'test' }));
   });
 
   it('handles URL input correctly', async () => {
